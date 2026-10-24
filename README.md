@@ -57,7 +57,18 @@ Because every token is unique, an attacker who rotates IP addresses but reuses a
   | Contain | Ban the IP at the host firewall (nftables/ipset, with expiry) and kill the session |
   | Preserve → Contain | Snapshot the decoy container for forensics, then contain |
 
-### 5. Command & Telemetry Dashboard
+### 5. Containment and Disruption
+When an attacker's risk score crosses the containment threshold, Mirage launches a graded disruption sequence. Every action targets only the attacker's own session and the decoy containers that Mirage controls, so the whole response stays inside the isolated lab and never reaches into any external machine. The aim is to stop the intrusion cold, waste the attacker's time, and keep the evidence.
+
+- **Session freeze:** the active connection is throttled to a standstill, so the attacker's tools stall, hang and time out.
+- **Resource starvation:** the compromised decoy session is driven into heavy load until the attacker's terminal locks up and stops responding.
+- **Exfiltration choke:** any attempt to download a planted database dump is answered with an oversized decoy archive that saturates the attacker's own transfer and aborts the theft.
+- **Lockout and notice:** the session is terminated, a visible notice tells the intruder they have been detected and contained, and the source address is banned at the host firewall with an expiry timer.
+- **Forensic capture:** before the decoy resets, Mirage snapshots the container and the full session recording for later study.
+
+On the dashboard this plays out live. The attacker's kill chain halts mid progress, every disruption step lights up in sequence, and the containment log fills in real time while the intruder is frozen out of the environment.
+
+### 6. Command & Telemetry Dashboard
 A real-time web UI showing:
 - a live incident map of attacker → decoy activity
 - kill-chain timelines
