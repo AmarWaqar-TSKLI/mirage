@@ -2,7 +2,7 @@
 
 **An Adaptive Cyber Deception and Active Response Platform**
 
-Mirage is an Information Security project that turns a network into a trap. Instead of searching for attackers in a flood of legitimate traffic and logs, Mirage plants fake services, credentials and documents that no legitimate user has any reason to touch. When something touches them, it's an attacker, so alerts are high-fidelity with near-zero false positives. Mirage then detects, profiles and automatically contains the attacker.
+Mirage is an Information Security project that turns a network into a trap. Instead of searching for attackers in a flood of legitimate traffic and logs, Mirage plants fake services, credentials and files that no legitimate user has any reason to touch. When something touches them, it's an attacker, so alerts are high-fidelity with near-zero false positives. Mirage then detects, profiles and automatically contains the attacker.
 
 The project is based on the [MITRE Engage](https://engage.mitre.org) framework for adversary engagement, and every observed action is mapped to [MITRE ATT&CK](https://attack.mitre.org) techniques.
 
@@ -12,6 +12,12 @@ The project is based on the [MITRE Engage](https://engage.mitre.org) framework f
 
 ## How it works
 
+Mirage is one working pipeline. A single attack path feeds a single flow of events:
+
+```
+Decoys → Detection → Response → Dashboard
+```
+
 An attacker who breaches the perimeter finds a deliberately planted **breadcrumb trail**:
 
 ```
@@ -19,15 +25,15 @@ robots.txt → exposed backup .env → SSH credentials → fake SSH server
           → ~/.aws/credentials → fake S3 bucket → passwords.xlsx
 ```
 
-Each step is a decoy or a uniquely traceable honeytoken. Mirage knows exactly which asset was stolen, where it was planted, and how far along the attack chain the intruder has progressed. Once the attacker's risk crosses a threshold, Mirage contains them automatically.
+Each step is a decoy or a uniquely traceable honeytoken. Mirage knows exactly which asset was stolen, where it was planted, and how far along the trail the intruder has progressed. Once the attacker's risk crosses a threshold, Mirage contains them automatically.
 
 ## Components
 
 ### 1. Decoy Infrastructure
 Docker containers hosting intentionally exposed, realistic-looking decoy services:
-- **Fake admin panel**: an internal login/admin portal that records brute-force attempts, credential stuffing, directory enumeration and injection attempts.
-- **Fake internal SSH server**: an interactive server with a believable filesystem full of planted secrets. Full sessions are recorded for replay.
-- **Fake AWS S3/API endpoint**: an S3-compatible service (MinIO/LocalStack) that accepts the planted fake AWS keys, so stolen cloud credentials can be traced end to end.
+- **Fake admin panel**: an internal login page whose `robots.txt` points to an exposed backup `.env`. Records login attempts and directory enumeration.
+- **Fake internal SSH server**: an interactive server with a believable filesystem holding planted secrets. Full sessions are recorded as evidence.
+- **Fake AWS S3 endpoint**: an S3-compatible service (MinIO) that accepts the planted fake AWS keys, so stolen cloud credentials can be traced end to end.
 
 ### 2. AI-Driven Interactive Shell
 Traditional honeypots only emulate a fixed set of commands, so attackers quickly spot them. Mirage's SSH decoy uses a hybrid design:
@@ -36,66 +42,56 @@ Traditional honeypots only emulate a fixed set of commands, so attackers quickly
 - **Session state:** files and directories the attacker creates persist for the whole session.
 - **Command intelligence:** each command is classified to an ATT&CK technique and streamed live to the dashboard.
 
-### 3. Honeytoken Fabric
-A generation engine that creates and tracks unique honeytokens:
-- Fake API keys and AWS access keys in authentic formats (in `.env`, config files, git history)
-- Fake database credentials and **honey records** (fake DB rows that alert when read)
-- **Canary documents** (`passwords.xlsx`, `.docx`, `.pdf`) that call home when opened
-- Honey URLs and DNS canaries for detecting reconnaissance
-
-Because every token is unique, an attacker who rotates IP addresses but reuses a stolen credential is still linked to the **same attacker identity**.
+### 3. Honeytokens
+Uniquely tagged fake secrets, each recorded where it was planted:
+- A fake SSH password in the exposed `.env`
+- Fake AWS keys in `~/.aws/credentials`
+- A bait `passwords.xlsx` in the fake S3 bucket that alerts when downloaded
+- A fake link in `robots.txt` that reveals scanning
 
 ### 4. Detection & Active Response Controller
-- **Route validation:** a reverse proxy checks traffic against authentic service routes. Anything that hits a decoy route is hostile.
-- **Instant alerting:** each alert carries the attacker's IP, client fingerprint (HASSH/JA3, scanner signatures), the asset touched and the mapped ATT&CK/Engage technique.
-- **Attacker profiling:** a per-attacker risk score built from fingerprints, tools used and breadcrumb progress.
+- **Single event flow:** every decoy sends events to one controller in one common format.
+- **Instant alerting:** each alert carries the attacker's IP, the asset touched and the mapped ATT&CK/Engage technique.
+- **Attacker profiling:** a per-attacker risk score built from trail progress and techniques used.
 - **Graded response playbooks:**
   | Playbook | Action |
   |---|---|
   | Observe | Let low-risk activity continue to gather intelligence |
   | Tarpit | Slow the attacker's connections to a crawl |
-  | Contain | Ban the IP at the host firewall (nftables/ipset, with expiry) and kill the session |
-  | Preserve → Contain | Snapshot the decoy container for forensics, then contain |
+  | Contain | Run the containment sequence below |
 
 ### 5. Containment and Disruption
-When an attacker's risk score crosses the containment threshold, Mirage launches a graded disruption sequence. Every action targets only the attacker's own session and the decoy containers that Mirage controls, so the whole response stays inside the isolated lab and never reaches into any external machine. The aim is to stop the intrusion cold, waste the attacker's time, and keep the evidence.
+When an attacker's risk score crosses the containment threshold, Mirage runs a disruption sequence. Every action targets only the attacker's own session and the decoy containers that Mirage controls, so the whole response stays inside the isolated lab.
 
 - **Session freeze:** the active connection is throttled to a standstill, so the attacker's tools stall, hang and time out.
-- **Resource starvation:** the compromised decoy session is driven into heavy load until the attacker's terminal locks up and stops responding.
-- **Exfiltration choke:** any attempt to download a planted database dump is answered with an oversized decoy archive that saturates the attacker's own transfer and aborts the theft.
-- **Lockout and notice:** the session is terminated, a visible notice tells the intruder they have been detected and contained, and the source address is banned at the host firewall with an expiry timer.
-- **Forensic capture:** before the decoy resets, Mirage snapshots the container and the full session recording for later study.
-
-On the dashboard this plays out live. The attacker's kill chain halts mid progress, every disruption step lights up in sequence, and the containment log fills in real time while the intruder is frozen out of the environment.
+- **Lockout and notice:** the session is terminated, a visible notice tells the intruder they have been detected and contained, and the source address is banned at the host firewall (nftables) with an expiry timer.
+- **Forensic capture:** before the decoy resets, Mirage saves the full session recording and a snapshot of the container.
 
 ### 6. Command & Telemetry Dashboard
-A real-time web UI showing:
-- a live incident map of attacker → decoy activity
-- kill-chain timelines
-- credential-theft and honeytoken events
-- SSH session replay
+A single real-time web page showing:
+- the live event feed
+- progress along the trail
+- credential-theft events
 - observed ATT&CK techniques
 - a log of automated containment actions
 
 ## Evaluation
 
-Mirage will be tested in an isolated lab against scripted attack campaigns (nmap, gobuster, hydra, AWS CLI) while a benign traffic generator simulates normal users. We will measure:
+Mirage will be tested in an isolated lab against a scripted attack campaign (nmap, gobuster, hydra, AWS CLI) while a benign traffic generator simulates normal users. We will measure:
 - Mean **time-to-detect** and **time-to-contain**
 - **False-positive rate** under benign traffic
 - **ATT&CK technique coverage**
-- **Attacker dwell time** in the AI shell compared with a static-command honeypot
 
 ## Planned Tech Stack
 
 | Layer | Technology |
 |---|---|
 | Lab environment | Docker, Docker Compose |
-| Controller / API | Python, FastAPI |
+| Controller / API | Python, FastAPI, SQLite |
 | SSH decoy | Paramiko + LLM-backed shell |
-| Fake S3 | MinIO / LocalStack |
-| Containment | nftables, ipset |
-| Event streaming | Redis |
-| Dashboard | React, WebSockets |
+| Fake S3 | MinIO |
+| Containment | nftables |
+| Dashboard | Single web page, WebSockets |
 
 ## Scope & Ethics
 
