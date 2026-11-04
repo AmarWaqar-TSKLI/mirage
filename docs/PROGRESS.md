@@ -25,7 +25,7 @@ Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are stil
 - **Shared package** `common/mirage_common/`, installed by every service:
   - `events.py`: the single `Event` model every decoy sends. See [event-format.md](event-format.md).
   - `trail.py`: the six breadcrumb trail stages, in order.
-  - `honeytokens.py`: loads `config/honeytokens.json`, the registry of planted items.
+  - `honeytokens.py`: loads the registry of planted items and generates their fake secret values.
   - `client.py`: `EventClient`. `submit()` sends events in the background and never raises, so a decoy keeps working even if the controller is down.
 - **Lab network** (`docker-compose.yml`):
   - `lab` (10.66.0.0/24) is `internal`, so no container on it can reach the internet.
@@ -60,7 +60,7 @@ Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are stil
 - `/backup/.env.bak` leaks `DEPLOY_HOST`, `DEPLOY_USER` and `DEPLOY_PASSWORD` for the SSH decoy (honeytoken, stage 2).
 - Every request is reported, with method, status code, query and user agent.
 - The panel disguises itself as nginx: it sends an nginx `Server` header, all framework errors (404, 405, `/docs`) look like plain nginx 404 pages, and FastAPI's docs are disabled.
-- `tools/gen_honeytokens.py` generates the fake SSH password and an AWS-format key pair into `config/honeytokens.json`. Re-run it to rotate them.
+- `tools/gen_honeytokens.py` generates the fake SSH password and an AWS-format key pair. The committed `config/honeytokens.json` is only a template with IDs, stages and locations. The values go to `config/honeytokens.local.json`, which is git-ignored, so every deployment gets unique secrets. Re-run it to rotate them.
 
 ### Step 4: SSH decoy (`decoys/ssh/`)
 - **Server** (`server.py`, Paramiko):
@@ -92,7 +92,7 @@ Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are stil
 
 ### Step 5: Fake S3 endpoint (trail stages 5–6)
 - An S3-compatible service at `10.66.0.22:9000`, bucket `corp-backups`, holding `finance/passwords.xlsx` plus some filler objects (for example `releases/ops-console-v3.8.2.tar.gz`, which `deploy.sh` mentions).
-- It must accept the planted key pair from the `ht-aws-access-key` registry value. A read-only, non-admin user is preferred.
+- It must accept the planted key pair from the `ht-aws-access-key` value in `config/honeytokens.local.json`. A read-only, non-admin user is preferred.
 - Report events in the common format:
   - any successful request with the planted key → `honeytoken_used`, `honeytoken_id: ht-aws-access-key`
   - downloading `finance/passwords.xlsx` → `file_access`, `honeytoken_id: ht-passwords-xlsx`
@@ -136,7 +136,7 @@ Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are stil
 - Decoys send events from a background thread pool, so events from one burst can reach the controller slightly out of order. Stage tracking and alerts are unaffected because `max_stage` only increases, but the dashboard should sort by event `timestamp`.
 - The admin panel's `Server` header is sent in lowercase (`server:`), a tiny fingerprinting tell. It is valid HTTP.
 - MITRE Engage activities are labelled by name ("Lures", "Network Monitoring", "System Activity Monitoring"). Check the names and add the official IDs from engage.mitre.org before the final report.
-- The fake secrets in `config/honeytokens.json` are committed on purpose. They are fake and only work against Mirage's own decoys.
+- Fake secrets are never committed. GitHub push protection rejects AWS-format keys even when they are fake, so the values are generated locally into the git-ignored `config/honeytokens.local.json`. Never move them into a tracked file.
 
 ---
 
@@ -145,6 +145,7 @@ Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are stil
 ```bash
 cp .env.example .env
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"   # paste into MIRAGE_INGEST_TOKEN in .env
+pip install ./common && python3 tools/gen_honeytokens.py         # writes config/honeytokens.local.json
 docker compose up -d --build
 curl localhost:8000/api/alerts
 ```
@@ -174,7 +175,7 @@ uv pip install --python .venv ./common -r controller/requirements-dev.txt \
 
 ```
 common/mirage_common/   shared event format, trail stages, honeytoken registry, event client
-config/honeytokens.json registry of planted items (IDs, stages, fake values)
+config/honeytokens.json registry template of planted items (IDs, stages, locations)
 controller/             FastAPI controller: ingest, storage, labelling, alerts
 decoys/admin-panel/     fake admin web panel (stages 1-2)
 decoys/ssh/             fake SSH deploy server with scripted shell (stages 3-4)
