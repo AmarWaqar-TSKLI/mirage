@@ -5,6 +5,9 @@
 #   mgmt - normal bridge. Only the controller joins it, so the dashboard is
 #          reachable from the host and the controller can reach the LLM API.
 #          Decoys never get internet access directly.
+#
+# Before the first run, generate this deployment's fake secrets:
+#   python3 tools/gen_honeytokens.py   ->  config/honeytokens.local.json
 
 name: mirage
 
@@ -19,7 +22,7 @@ services:
       MIRAGE_HONEYTOKENS: /etc/mirage/honeytokens.json
     volumes:
       - controller-data:/data
-      - ./config/honeytokens.json:/etc/mirage/honeytokens.json:ro
+      - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
     networks:
       lab:
         ipv4_address: 10.66.0.10
@@ -37,7 +40,7 @@ services:
       MIRAGE_INGEST_TOKEN: ${MIRAGE_INGEST_TOKEN:?set MIRAGE_INGEST_TOKEN in .env}
       MIRAGE_HONEYTOKENS: /etc/mirage/honeytokens.json
     volumes:
-      - ./config/honeytokens.json:/etc/mirage/honeytokens.json:ro
+      - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
     networks:
       lab:
         ipv4_address: 10.66.0.20
@@ -52,7 +55,7 @@ services:
       <<: *decoy-env
       MIRAGE_DATA_DIR: /data
     volumes:
-      - ./config/honeytokens.json:/etc/mirage/honeytokens.json:ro
+      - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
       - ssh-data:/data          # host key and session recordings (evidence)
     networks:
       lab:

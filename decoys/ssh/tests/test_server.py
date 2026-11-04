@@ -2,6 +2,7 @@
 
 import json
 import socket
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -11,8 +12,11 @@ import pytest
 
 from app.server import AWS_FILE_TOKEN, BANNER, SSH_TOKEN, Decoy
 from mirage_common import EventType, Registry
+from mirage_common.honeytokens import generate
 
-REGISTRY = Registry.load(Path(__file__).parents[3] / "config" / "honeytokens.json")
+# Fresh fake secrets for this test run, generated from the committed template.
+_TEMPLATE = Path(__file__).parents[3] / "config" / "honeytokens.json"
+REGISTRY = Registry.load(generate(_TEMPLATE, Path(tempfile.mkdtemp()) / "honeytokens.json"))
 CREDS = REGISTRY.get(SSH_TOKEN).value
 
 

@@ -1,7 +1,12 @@
 import os
+import tempfile
 from pathlib import Path
 
-os.environ.setdefault("MIRAGE_HONEYTOKENS", str(Path(__file__).parents[3] / "config" / "honeytokens.json"))
+from mirage_common.honeytokens import generate
+
+# The app loads the registry at import time, so generate fresh fake secrets first.
+_TEMPLATE = Path(__file__).parents[3] / "config" / "honeytokens.json"
+os.environ["MIRAGE_HONEYTOKENS"] = str(generate(_TEMPLATE, Path(tempfile.mkdtemp()) / "honeytokens.json"))
 
 import pytest
 from fastapi.testclient import TestClient
