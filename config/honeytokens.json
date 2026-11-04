@@ -1,0 +1,46 @@
+{
+  "honeytokens": [
+    {
+      "id": "ht-robots-backup-link",
+      "kind": "robots_link",
+      "stage": 1,
+      "planted_at": "admin-panel:/robots.txt",
+      "description": "Disallow entry pointing at the hidden backup directory"
+    },
+    {
+      "id": "ht-env-backup-file",
+      "kind": "env_file",
+      "stage": 2,
+      "planted_at": "admin-panel:/backup/.env.bak",
+      "description": "Exposed backup .env containing the SSH password"
+    },
+    {
+      "id": "ht-ssh-password",
+      "kind": "ssh_password",
+      "stage": 3,
+      "planted_at": "admin-panel:/backup/.env.bak",
+      "description": "SSH credentials for the fake internal server"
+    },
+    {
+      "id": "ht-aws-credentials-file",
+      "kind": "aws_credentials_file",
+      "stage": 4,
+      "planted_at": "ssh:/home/deploy/.aws/credentials",
+      "description": "AWS credentials file on the SSH decoy"
+    },
+    {
+      "id": "ht-aws-access-key",
+      "kind": "aws_key",
+      "stage": 5,
+      "planted_at": "ssh:/home/deploy/.aws/credentials",
+      "description": "Fake AWS access key accepted by the MinIO decoy"
+    },
+    {
+      "id": "ht-passwords-xlsx",
+      "kind": "bait_file",
+      "stage": 6,
+      "planted_at": "s3:corp-backups/finance/passwords.xlsx",
+      "description": "Bait spreadsheet in the fake S3 bucket"
+    }
+  ]
+}
