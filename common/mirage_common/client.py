@@ -2,6 +2,7 @@
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
@@ -28,3 +29,11 @@ class EventClient:
         except httpx.HTTPError as e:
             log.warning("failed to send event %s: %s", event.event_id, e)
             return False
+
+    def submit(self, event: Event) -> None:
+        """Send an event in the background so the attacker never waits on it."""
+        _pool.submit(self.send, event)
+
+
+# Shared by every client in the process; a few workers are plenty for a decoy.
+_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mirage-events")

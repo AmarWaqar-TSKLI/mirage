@@ -6,7 +6,6 @@ the SSH password for the next decoy. Every request is reported to the controller
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
@@ -29,7 +28,6 @@ ENV_BACKUP = pages.ENV_BACKUP.format(**registry.get(SSH_TOKEN).value)
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
-_pool = ThreadPoolExecutor(max_workers=4)
 _client: EventClient | None = None
 
 
@@ -37,7 +35,7 @@ def emit(event: Event) -> None:
     """Send an event without delaying the response to the attacker."""
     global _client
     _client = _client or EventClient()
-    _pool.submit(_client.send, event)
+    _client.submit(event)
 
 
 def mark(request: Request, **fields) -> None:
