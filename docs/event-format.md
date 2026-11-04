@@ -49,6 +49,13 @@ client.send(Event(source=Source.ADMIN_PANEL, event_type=EventType.FILE_ACCESS,
 | `session_start` / `session_end` | SSH session lifecycle |
 | `command` | a shell command in the SSH decoy; put `{"command": ...}` in `details` |
 
+## Tagging honeytokens
+
+Set `honeytoken_id` only when the planted item was **actually touched or used**. For example, tag a
+successful SSH login with the planted password, not a failed one. The IDs are listed in
+`config/honeytokens.json`. The controller raises one alert the first time each address touches
+each token. Repeats are stored as events only.
+
 ## Division of labour
 
 Decoys report **what happened**. The controller decides **what it means**: the trail stage

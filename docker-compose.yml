@@ -15,6 +15,11 @@ services:
       dockerfile: controller/Dockerfile
     environment:
       MIRAGE_INGEST_TOKEN: ${MIRAGE_INGEST_TOKEN:?set MIRAGE_INGEST_TOKEN in .env}
+      MIRAGE_DB_PATH: /data/mirage.db
+      MIRAGE_HONEYTOKENS: /etc/mirage/honeytokens.json
+    volumes:
+      - controller-data:/data
+      - ./config/honeytokens.json:/etc/mirage/honeytokens.json:ro
     networks:
       lab:
         ipv4_address: 10.66.0.10
@@ -32,3 +37,6 @@ networks:
       config:
         - subnet: 10.66.0.0/24
   mgmt: {}
+
+volumes:
+  controller-data:
