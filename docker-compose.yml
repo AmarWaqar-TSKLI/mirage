@@ -44,7 +44,23 @@ services:
     depends_on: [controller]
     restart: unless-stopped
 
-  # The ssh and s3 decoys and the attacker container are added in later steps.
+  ssh:
+    build:
+      context: .
+      dockerfile: decoys/ssh/Dockerfile
+    environment:
+      <<: *decoy-env
+      MIRAGE_DATA_DIR: /data
+    volumes:
+      - ./config/honeytokens.json:/etc/mirage/honeytokens.json:ro
+      - ssh-data:/data          # host key and session recordings (evidence)
+    networks:
+      lab:
+        ipv4_address: 10.66.0.21
+    depends_on: [controller]
+    restart: unless-stopped
+
+  # The s3 decoy and the attacker container are added in later steps.
 
 networks:
   lab:
@@ -56,3 +72,4 @@ networks:
 
 volumes:
   controller-data:
+  ssh-data:
