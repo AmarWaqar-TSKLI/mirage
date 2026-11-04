@@ -1,0 +1,34 @@
+# Mirage lab.
+#
+# Networks:
+#   lab  - internal (no internet). Decoys, the controller and the attacker live here.
+#   mgmt - normal bridge. Only the controller joins it, so the dashboard is
+#          reachable from the host and the controller can reach the LLM API.
+#          Decoys never get internet access directly.
+
+name: mirage
+
+services:
+  controller:
+    build:
+      context: .
+      dockerfile: controller/Dockerfile
+    environment:
+      MIRAGE_INGEST_TOKEN: ${MIRAGE_INGEST_TOKEN:?set MIRAGE_INGEST_TOKEN in .env}
+    networks:
+      lab:
+        ipv4_address: 10.66.0.10
+      mgmt: {}
+    ports:
+      - "127.0.0.1:8000:8000"   # dashboard/API, host-only
+    restart: unless-stopped
+
+  # Decoys (admin-panel, ssh, s3) and the attacker container are added in later steps.
+
+networks:
+  lab:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.66.0.0/24
+  mgmt: {}
