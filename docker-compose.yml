@@ -28,7 +28,23 @@ services:
       - "127.0.0.1:8000:8000"   # dashboard/API, host-only
     restart: unless-stopped
 
-  # Decoys (admin-panel, ssh, s3) and the attacker container are added in later steps.
+  admin-panel:
+    build:
+      context: .
+      dockerfile: decoys/admin-panel/Dockerfile
+    environment: &decoy-env
+      MIRAGE_CONTROLLER_URL: http://10.66.0.10:8000
+      MIRAGE_INGEST_TOKEN: ${MIRAGE_INGEST_TOKEN:?set MIRAGE_INGEST_TOKEN in .env}
+      MIRAGE_HONEYTOKENS: /etc/mirage/honeytokens.json
+    volumes:
+      - ./config/honeytokens.json:/etc/mirage/honeytokens.json:ro
+    networks:
+      lab:
+        ipv4_address: 10.66.0.20
+    depends_on: [controller]
+    restart: unless-stopped
+
+  # The ssh and s3 decoys and the attacker container are added in later steps.
 
 networks:
   lab:
