@@ -1,4 +1,4 @@
-"""Mirage controller: receives every decoy event, labels it, tracks attackers and raises alerts."""
+"""Mirage controller: receives every decoy event, labels it, tracks attackers, raises alerts, and executes active containment."""
 
 import logging
 import os
@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from mirage_common import Event, Registry
 
 from .engine import Engine
+from .response_engine import ResponseEngine
 from .store import Store
 
 log = logging.getLogger("mirage.controller")
@@ -20,8 +21,10 @@ logging.basicConfig(level=logging.INFO)
 async def lifespan(app: FastAPI):
     store = Store(os.environ.get("MIRAGE_DB_PATH", "/data/mirage.db"))
     registry = Registry.load(os.environ.get("MIRAGE_HONEYTOKENS", "/etc/mirage/honeytokens.json"))
+    response_engine = ResponseEngine(store)
     app.state.store = store
-    app.state.engine = Engine(store, registry)
+    app.state.response_engine = response_engine
+    app.state.engine = Engine(store, registry, response_engine=response_engine)
     yield
     store.db.close()
 
@@ -62,6 +65,11 @@ def list_alerts(request: Request, limit: int = 100, ip: str | None = None) -> li
     return request.app.state.store.recent("alerts", limit, ip)
 
 
+@app.get("/api/responses")
+def list_responses(request: Request, limit: int = 100, ip: str | None = None) -> list[dict]:
+    return request.app.state.store.recent("responses", limit, ip)
+
+
 @app.get("/api/attackers")
 def list_attackers(request: Request) -> list[dict]:
     return request.app.state.store.attackers()
@@ -73,3 +81,13 @@ def get_attacker(ip: str, request: Request) -> dict:
     if not attacker:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown attacker")
     return attacker
+
+
+@app.post("/api/contain/{ip}")
+def manual_contain(ip: str, request: Request) -> dict:
+    return request.app.state.response_engine.execute_containment(ip, reason="manual_operator_trigger")
+
+
+@app.post("/api/uncontain/{ip}")
+def manual_uncontain(ip: str, request: Request) -> dict:
+    return request.app.state.response_engine.firewall.unban(ip)
