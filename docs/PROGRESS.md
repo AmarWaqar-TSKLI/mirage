@@ -3,7 +3,7 @@
 Last updated: 4 November 2026. All work is on the `dev` branch.
 
 The build is split into 8 steps that follow the pipeline **Decoys → Detection → Response → Dashboard**.
-Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are still to do.
+Steps 1–5 are done and tested. Steps 6–8 and the optional LLM layer are still to do.
 
 | # | Step | Status |
 |---|---|---|
@@ -11,7 +11,7 @@ Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are stil
 | 2 | Controller core: storage, trail stages, ATT&CK/Engage labels, alerts | ✅ Done |
 | 3 | Admin panel decoy and honeytokens (robots.txt → .env leak) | ✅ Done |
 | 4 | SSH decoy: scripted shell, session recording | ✅ Done |
-| 5 | Fake S3 endpoint and `passwords.xlsx` bait | ⬜ To do |
+| 5 | Fake S3 endpoint and `passwords.xlsx` bait | ✅ Done |
 | 6 | Risk score, response playbooks, nftables containment | ⬜ To do |
 | 7 | Live dashboard | ⬜ To do |
 | 8 | Evaluation: attacker container, attack script, benign traffic, metrics | ⬜ To do |
@@ -75,29 +75,35 @@ Steps 1–4 are done and tested. Steps 5–8 and the optional LLM layer are stil
 - **Evidence:** every session is saved as JSON lines in `/data/sessions/<session_id>.jsonl` on the `ssh-data` volume.
 - **LLM-ready:** `Shell` takes an optional `fallback` hook for commands it does not know. Without one, unknown commands get bash's normal `command not found`. The whole pipeline works with no LLM.
 
+### Step 5: Fake S3 endpoint (`decoys/s3/`, trail stages 5–6)
+- **S3 service** (`main.py`, `storage.py`, `auth.py`):
+  - Emulates an S3-compatible storage service listening at `10.66.0.22:9000` with bucket `corp-backups`.
+  - Supports standard AWS SigV4 authentication (`Authorization: AWS4-HMAC-SHA256 ...`) and presigned query authentication.
+  - Accepts the planted AWS key pair (`ht-aws-access-key`, stage 5) leaked in `~/.aws/credentials`.
+  - Generates realistic XML responses for `ListBuckets` (`GET /`) and `ListObjectsV2` (`GET /corp-backups`).
+  - Holds filler archives (`releases/ops-console-v3.8.2.tar.gz`, `db/staging-dump-20261101.sql.gz`) and the bait spreadsheet.
+- **Bait spreadsheet** (`bait.py`):
+  - `finance/passwords.xlsx` generated with realistic corporate finance & banking credentials (stage 6).
+- **Telemetry reporting** (`reporting.py`):
+  - Any successful request with the planted AWS key reports `honeytoken_used` (`ht-aws-access-key`, T1078.004).
+  - Downloading `finance/passwords.xlsx` reports `file_access` (`ht-passwords-xlsx`, T1530).
+  - Requests with wrong/missing credentials report `login_attempt` with `success: false`.
+
 ### Testing
-- 49 automated tests, all passing:
+- 58 automated tests, all passing:
 
   | Suite | Tests |
   |---|---|
   | controller | 12 |
   | admin-panel | 6 |
   | ssh | 31, including real SSH logins with a Paramiko client |
+  | s3 | 9 |
 
 - A manual end-to-end run in the live lab from an attacker container went: directory scan → login brute force → robots.txt → .env leak → SSH brute force → login with the leaked password → recon → reading the AWS keys. The controller tracked the attacker to **stage 4/6** with 10 ATT&CK techniques and 5 alerts, and the session recording was saved.
 
 ---
 
 ## What is left
-
-### Step 5: Fake S3 endpoint (trail stages 5–6)
-- An S3-compatible service at `10.66.0.22:9000`, bucket `corp-backups`, holding `finance/passwords.xlsx` plus some filler objects (for example `releases/ops-console-v3.8.2.tar.gz`, which `deploy.sh` mentions).
-- It must accept the planted key pair from the `ht-aws-access-key` value in `config/honeytokens.local.json`. A read-only, non-admin user is preferred.
-- Report events in the common format:
-  - any successful request with the planted key → `honeytoken_used`, `honeytoken_id: ht-aws-access-key`
-  - downloading `finance/passwords.xlsx` → `file_access`, `honeytoken_id: ht-passwords-xlsx`
-  - requests with a wrong key → `login_attempt` with `success: false`
-- **Heads-up:** the official `minio/minio` Docker Hub image could not be pulled (MinIO stopped publishing community images in 2025). Options: build MinIO from source, use another registry mirror, or use a different S3-compatible server. For MinIO, the audit webhook (`MINIO_AUDIT_WEBHOOK_*`) plus a small adapter that converts audit logs into Mirage events is the cleanest way to report.
 
 ### Step 6: Risk scoring, playbooks, containment
 - A per-attacker **risk score** built from trail stage, techniques seen and activity rate, stored on the `attackers` row.
