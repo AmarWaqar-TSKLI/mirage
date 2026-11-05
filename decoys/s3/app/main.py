@@ -41,9 +41,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             log.exception("failed to load honeytoken registry from %s", token_path)
 
-    app.state.storage = Storage()
-    app.state.auth = S3Authenticator(expected_access_key, expected_secret_key)
-    app.state.reporter = S3Reporter()
+    if not hasattr(app.state, "storage") or app.state.storage is None:
+        app.state.storage = Storage()
+    if not hasattr(app.state, "auth") or app.state.auth is None:
+        app.state.auth = S3Authenticator(expected_access_key, expected_secret_key)
+    if not hasattr(app.state, "reporter") or app.state.reporter is None:
+        app.state.reporter = S3Reporter()
     log.info("s3 decoy ready; accepting access key: %s...", expected_access_key[:8] if expected_access_key else "none")
     yield
 
@@ -52,8 +55,15 @@ app = FastAPI(title="Mirage S3 Decoy", lifespan=lifespan, docs_url=None, redoc_u
 
 
 def _client_ip_port(request: Request) -> tuple[str, Optional[int]]:
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    import ipaddress
+    client_ip = "127.0.0.1"
     client_port = request.client.port if request.client else None
+    if request.client and request.client.host:
+        try:
+            ipaddress.ip_address(request.client.host)
+            client_ip = request.client.host
+        except ValueError:
+            client_ip = "127.0.0.1"
     return client_ip, client_port
 
 
