@@ -21,6 +21,7 @@ import paramiko
 from mirage_common import Event, EventClient, EventType, Registry, Source
 
 from .classify import classify
+from .control import start_control_server
 from .fs import AWS_CREDENTIALS, FileSystem
 from .shell import Shell
 
@@ -108,6 +109,7 @@ class Connection(paramiko.ServerInterface):
         self.exec_command: str | None = None
         self.ready = threading.Event()   # set once the client asks for a shell or exec
         self.transport: paramiko.Transport | None = None
+        self.channel: paramiko.Channel | None = None
         self.recorder: Recorder | None = None
 
     # ------------------------------------------------------------- reporting
@@ -182,6 +184,7 @@ class Connection(paramiko.ServerInterface):
             self.close(graceful=True)
 
     def _session(self, channel: paramiko.Channel) -> None:
+        self.channel = channel
         started = time.monotonic()
         shell = Shell(self.decoy.base_fs.copy(), peer=(self.ip, self.port))
         self.recorder = Recorder(
@@ -271,6 +274,16 @@ class Connection(paramiko.ServerInterface):
                             details={"command": line})
         return output.replace("\n", "\r\n")
 
+    def notify_and_kick(self, notice: str = "*** UNAUTHORIZED ACTIVITY DETECTED. ACCESS TERMINATED. ***\r\n") -> None:
+        """Inform the intruder they have been detected and instantly terminate the connection."""
+        try:
+            if self.channel and self.channel.active:
+                self.channel.sendall(f"\r\n\x1b[31;1m{notice}\x1b[0m\r\n")
+                time.sleep(0.3)
+        except Exception:
+            pass
+        self.close(graceful=False)
+
     def close(self, graceful: bool = False) -> None:
         """Tear the connection down (also used by containment to kick the attacker).
 
@@ -296,12 +309,15 @@ def main() -> None:
     client = EventClient()
     decoy = Decoy(registry, client.submit, Path(os.environ.get("MIRAGE_DATA_DIR", "/data")))
 
+    control_port = int(os.environ.get("SSH_CONTROL_PORT", "8022"))
+    start_control_server(decoy, control_port)
+
     port = int(os.environ.get("SSH_PORT", "22"))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", port))
     sock.listen(100)
-    log.info("ssh decoy listening on %d", port)
+    log.info("ssh decoy listening on %d (control port %d)", port, control_port)
     decoy.serve(sock)
 
 
