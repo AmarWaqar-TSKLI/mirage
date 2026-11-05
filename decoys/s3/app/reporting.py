@@ -1,7 +1,7 @@
 """Telemetry and honeytoken event reporting for the S3 decoy."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from mirage_common import Event, EventClient, EventType, Source
 
 log = logging.getLogger("mirage.s3")
@@ -11,9 +11,16 @@ HT_PASSWORDS_XLSX = "ht-passwords-xlsx"
 
 
 class S3Reporter:
-    def __init__(self, emit=None):
-        self._client = EventClient() if emit is None else None
-        self._emit = emit or self._client.submit
+    def __init__(self, emit: Optional[Callable[[Event], Any]] = None):
+        self._custom_emit = emit
+        self._client: Optional[EventClient] = None
+
+    def _get_emit(self) -> Callable[[Event], Any]:
+        if self._custom_emit is not None:
+            return self._custom_emit
+        if self._client is None:
+            self._client = EventClient()
+        return self._client.submit
 
     def report(
         self,
@@ -36,7 +43,7 @@ class S3Reporter:
                 attack_techniques=attack_techniques or [],
                 details=details or {},
             )
-            self._emit(event)
+            self._get_emit()(event)
         except Exception:
             # Telemetry errors must never disrupt decoy operation
             log.exception("failed to emit S3 event")
