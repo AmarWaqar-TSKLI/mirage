@@ -29,6 +29,8 @@ services:
       mgmt: {}
     ports:
       - "127.0.0.1:8000:8000"   # dashboard/API, host-only
+    cap_add:
+      - NET_ADMIN
     restart: unless-stopped
 
   admin-panel:

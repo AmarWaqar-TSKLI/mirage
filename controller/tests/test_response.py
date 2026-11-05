@@ -1,14 +1,27 @@
 import pytest
-from controller.app.playbooks import Allowlist, ResponsePolicy
-from controller.app.response_engine import ResponseEngine
-from controller.app.risk import (
-    CONTAINMENT_THRESHOLD,
-    TARPIT_THRESHOLD,
-    Playbook,
-    calculate_risk_score,
-    evaluate_playbook,
-)
-from controller.app.store import Store
+
+try:
+    from app.playbooks import Allowlist, ResponsePolicy
+    from app.response_engine import ResponseEngine
+    from app.risk import (
+        CONTAINMENT_THRESHOLD,
+        TARPIT_THRESHOLD,
+        Playbook,
+        calculate_risk_score,
+        evaluate_playbook,
+    )
+    from app.store import Store
+except ImportError:
+    from controller.app.playbooks import Allowlist, ResponsePolicy
+    from controller.app.response_engine import ResponseEngine
+    from controller.app.risk import (
+        CONTAINMENT_THRESHOLD,
+        TARPIT_THRESHOLD,
+        Playbook,
+        calculate_risk_score,
+        evaluate_playbook,
+    )
+    from controller.app.store import Store
 
 
 class MockEvictor:

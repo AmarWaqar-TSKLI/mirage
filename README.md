@@ -6,8 +6,7 @@ Mirage is an Information Security project that turns a network into a trap. Inst
 
 The project is based on the [MITRE Engage](https://engage.mitre.org) framework for adversary engagement, and every observed action is mapped to [MITRE ATT&CK](https://attack.mitre.org) techniques.
 
-> **Status:** In development. Steps 1–4 of 8 are done: the controller, the admin panel decoy and the SSH decoy all work
-> end to end in the lab. See [docs/PROGRESS.md](docs/PROGRESS.md) for what is done, what is left, and how to run it.
+> **Status:** In development. Steps 1–6 of 8 are done: the controller, decoys (admin panel, SSH server, S3 endpoint), dynamic risk scoring, response playbooks, and active containment all work end to end in the lab. See [docs/PROGRESS.md](docs/PROGRESS.md) for what is done, what is left, and how to run it.
 
 ---
 

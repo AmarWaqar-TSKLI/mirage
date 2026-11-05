@@ -1,10 +1,16 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from decoys.s3.app.auth import S3Authenticator
-from decoys.s3.app.main import app
-from decoys.s3.app.reporting import S3Reporter
-from decoys.s3.app.storage import Storage
+try:
+    from app.auth import S3Authenticator
+    from app.main import app
+    from app.reporting import S3Reporter
+    from app.storage import Storage
+except ImportError:
+    from decoys.s3.app.auth import S3Authenticator
+    from decoys.s3.app.main import app
+    from decoys.s3.app.reporting import S3Reporter
+    from decoys.s3.app.storage import Storage
 
 TEST_ACCESS_KEY = "AKIAEXAMPLE12345678"
 TEST_SECRET_KEY = "SECRET12345678901234567890123456789012"

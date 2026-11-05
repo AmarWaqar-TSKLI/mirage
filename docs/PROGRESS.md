@@ -3,7 +3,7 @@
 Last updated: 4 November 2026. All work is on the `dev` branch.
 
 The build is split into 8 steps that follow the pipeline **Decoys → Detection → Response → Dashboard**.
-Steps 1–5 are done and tested. Steps 6–8 and the optional LLM layer are still to do.
+Steps 1–6 are done and tested. Steps 7–8 and the optional LLM layer are still to do.
 
 | # | Step | Status |
 |---|---|---|
@@ -12,7 +12,7 @@ Steps 1–5 are done and tested. Steps 6–8 and the optional LLM layer are stil
 | 3 | Admin panel decoy and honeytokens (robots.txt → .env leak) | ✅ Done |
 | 4 | SSH decoy: scripted shell, session recording | ✅ Done |
 | 5 | Fake S3 endpoint and `passwords.xlsx` bait | ✅ Done |
-| 6 | Risk score, response playbooks, nftables containment | ⬜ To do |
+| 6 | Risk score, response playbooks, nftables containment | ✅ Done |
 | 7 | Live dashboard | ⬜ To do |
 | 8 | Evaluation: attacker container, attack script, benign traffic, metrics | ⬜ To do |
 | + | LLM layer for the SSH shell (optional) | ⬜ Deferred |
@@ -89,12 +89,28 @@ Steps 1–5 are done and tested. Steps 6–8 and the optional LLM layer are stil
   - Downloading `finance/passwords.xlsx` reports `file_access` (`ht-passwords-xlsx`, T1530).
   - Requests with wrong/missing credentials report `login_attempt` with `success: false`.
 
+### Step 6: Risk scoring, playbooks, containment (`controller/app/`)
+- **Dynamic risk scoring** (`risk.py`):
+  - Normalized 0–100 score computed from trail stage progress, unique ATT&CK techniques, breached honeytokens, and event velocity.
+  - Automatically classifies attackers into graded response tiers: **Watch** (0–39), **Tarpit** (40–74), and **Contain** (75–100).
+- **Defender protection** (`playbooks.py`):
+  - Configurable IP allowlist (`127.0.0.1`, `10.66.0.1`, `10.66.0.10`, subnet ranges) that protects defender/admin machines from ever being throttled or banned.
+- **SSH decoy session control** (`decoys/ssh/app/control.py`, `evict.py`):
+  - Authenticated HTTP control endpoint (`:8022`) on the SSH decoy for listing live sessions and immediately evicting intruders with a security banner notice.
+- **Firewall containment driver** (`firewall.py`):
+  - Adds real-time network drops via `nftables` or `iptables` with configurable ban durations and simulation fallback.
+- **Forensic snapshot capture** (`forensics.py`):
+  - Triggers automated container state preservation (`docker commit`) tagging forensic image captures before resets.
+- **Active response orchestration** (`response_engine.py`, `main.py`):
+  - Automated containment pipeline wired directly into event ingestion.
+  - REST endpoints for response logging (`GET /api/responses`) and manual operator containment (`POST /api/contain/{ip}`, `POST /api/uncontain/{ip}`).
+
 ### Testing
-- 58 automated tests, all passing:
+- 63 automated tests, all passing:
 
   | Suite | Tests |
   |---|---|
-  | controller | 12 |
+  | controller | 17 (core engine, events, risk scoring & containment) |
   | admin-panel | 6 |
   | ssh | 31, including real SSH logins with a Paramiko client |
   | s3 | 9 |
@@ -104,17 +120,6 @@ Steps 1–5 are done and tested. Steps 6–8 and the optional LLM layer are stil
 ---
 
 ## What is left
-
-### Step 6: Risk scoring, playbooks, containment
-- A per-attacker **risk score** built from trail stage, techniques seen and activity rate, stored on the `attackers` row.
-- **Playbooks** chosen by thresholds: **Watch** (low) → **Slow down** (tarpit) → **Shut out** (contain).
-- An **allow list** of defender IPs that are never acted on.
-- **Containment sequence:**
-  1. Freeze the session (throttle it with `tc`, or delay responses).
-  2. Show the intruder a notice and end the session. `Connection.close()` in the SSH decoy already kicks a session, and `Decoy.sessions` lists the live ones, but the controller still needs a way to call it, for example a small authenticated control endpoint on the decoy.
-  3. Ban the address with nftables for a set time. The controller (or a helper container) needs `NET_ADMIN` on the lab network.
-  4. Save evidence: the session recording already exists, and a container snapshot still needs to be added (`docker commit`).
-- Log every response action in a new `responses` table so the dashboard can show it.
 
 ### Step 7: Dashboard
 - A single page served by the controller that updates live over WebSockets. Add a broadcast in `ingest_event` after `engine.process`.
