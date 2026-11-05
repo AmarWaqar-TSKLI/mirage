@@ -1,4 +1,4 @@
-"""SQLite storage for events, alerts and per-attacker state."""
+"""SQLite storage for events, alerts, attackers, and active responses."""
 
 import json
 import sqlite3
@@ -42,9 +42,23 @@ CREATE TABLE IF NOT EXISTS attackers (
     last_seen     TEXT NOT NULL,
     event_count   INTEGER NOT NULL DEFAULT 0,
     max_stage     INTEGER NOT NULL DEFAULT 0,
+    risk_score    INTEGER NOT NULL DEFAULT 0,
+    playbook      TEXT NOT NULL DEFAULT 'watch',
+    contained_at  TEXT,
     techniques    TEXT NOT NULL DEFAULT '[]',
     tokens        TEXT NOT NULL DEFAULT '[]'
 );
+
+CREATE TABLE IF NOT EXISTS responses (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT NOT NULL,
+    src_ip        TEXT NOT NULL,
+    playbook      TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    details       TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS responses_ip ON responses (src_ip, ts);
 """
 
 JSON_COLUMNS = {"techniques", "engage", "details", "tokens"}
@@ -80,23 +94,39 @@ class Store:
         )
         return {**a, "id": cur.lastrowid}
 
+    def insert_response(self, r: dict) -> dict:
+        cur = self.db.execute(
+            "INSERT INTO responses (ts, src_ip, playbook, action, status, details)"
+            " VALUES (:ts, :src_ip, :playbook, :action, :status, :details)",
+            {**r, "details": json.dumps(r.get("details", {}))},
+        )
+        return {**r, "id": cur.lastrowid}
+
     def get_attacker(self, ip: str) -> dict | None:
         row = self.db.execute("SELECT * FROM attackers WHERE ip = ?", (ip,)).fetchone()
         return _row(row) if row else None
 
     def upsert_attacker(self, a: dict) -> None:
         self.db.execute(
-            "INSERT INTO attackers VALUES (:ip, :first_seen, :last_seen, :event_count, :max_stage, :techniques, :tokens)"
+            "INSERT INTO attackers VALUES (:ip, :first_seen, :last_seen, :event_count, :max_stage, :risk_score, :playbook, :contained_at, :techniques, :tokens)"
             " ON CONFLICT (ip) DO UPDATE SET last_seen = excluded.last_seen, event_count = excluded.event_count,"
-            " max_stage = excluded.max_stage, techniques = excluded.techniques, tokens = excluded.tokens",
-            {**a, "techniques": json.dumps(a["techniques"]), "tokens": json.dumps(a["tokens"])},
+            " max_stage = excluded.max_stage, risk_score = excluded.risk_score, playbook = excluded.playbook,"
+            " contained_at = coalesce(excluded.contained_at, attackers.contained_at), techniques = excluded.techniques, tokens = excluded.tokens",
+            {
+                "risk_score": 0,
+                "playbook": "watch",
+                "contained_at": None,
+                **a,
+                "techniques": json.dumps(a["techniques"]),
+                "tokens": json.dumps(a["tokens"]),
+            },
         )
 
     def commit(self) -> None:
         self.db.commit()
 
     def recent(self, table: str, limit: int, ip: str | None = None) -> list[dict]:
-        assert table in {"events", "alerts"}
+        assert table in {"events", "alerts", "responses"}
         where, args = ("WHERE src_ip = ?", [ip]) if ip else ("", [])
         rows = self.db.execute(f"SELECT * FROM {table} {where} ORDER BY ts DESC LIMIT ?", [*args, limit])
         return [_row(r) for r in rows]
