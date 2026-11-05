@@ -63,7 +63,21 @@ services:
     depends_on: [controller]
     restart: unless-stopped
 
-  # The s3 decoy and the attacker container are added in later steps.
+  s3:
+    build:
+      context: .
+      dockerfile: decoys/s3/Dockerfile
+    environment:
+      <<: *decoy-env
+    volumes:
+      - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
+    networks:
+      lab:
+        ipv4_address: 10.66.0.22
+    depends_on: [controller]
+    restart: unless-stopped
+
+  # The attacker container is added in later steps.
 
 networks:
   lab:
