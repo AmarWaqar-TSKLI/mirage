@@ -1,326 +1,235 @@
 "use strict";
 
-/* Mirage dashboard.
- *
- * SECURITY: every field rendered here is attacker-controlled (usernames,
- * passwords, shell commands, paths, user agents, access keys). It is ONLY ever
- * placed with textContent or as element attributes set via the DOM API, never
- * with innerHTML. Do not introduce innerHTML on any data path.
+/* Mirage deception grid — live console.
+ * SECURITY: every value is attacker-controlled. Only ever placed with
+ * textContent or DOM attributes, never innerHTML. Keep it that way.
  */
 
-const TRAIL_STAGES = [
-  "robots.txt",
-  "backup .env",
-  "SSH login",
-  "AWS creds",
-  "S3 access",
-  "passwords.xlsx",
-];
-
-// ATT&CK technique id -> readable name. Covers every id the decoys emit;
-// anything unmapped falls back to showing the raw id.
 const ATTACK = {
-  "T1003.008": "OS Credential Dumping: /etc/passwd & /etc/shadow",
-  "T1016": "System Network Configuration Discovery",
-  "T1021.004": "Remote Services: SSH",
-  "T1033": "System Owner/User Discovery",
-  "T1046": "Network Service Discovery",
-  "T1049": "System Network Connections Discovery",
-  "T1053.003": "Scheduled Task/Job: Cron",
-  "T1057": "Process Discovery",
-  "T1059.004": "Command & Scripting Interpreter: Unix Shell",
-  "T1070.002": "Indicator Removal: Clear Linux System Logs",
-  "T1070.003": "Indicator Removal: Clear Command History",
-  "T1078": "Valid Accounts",
-  "T1078.004": "Valid Accounts: Cloud Accounts",
-  "T1082": "System Information Discovery",
-  "T1083": "File & Directory Discovery",
-  "T1087.001": "Account Discovery: Local Account",
-  "T1098.004": "Account Manipulation: SSH Authorized Keys",
-  "T1105": "Ingress Tool Transfer",
-  "T1110": "Brute Force",
-  "T1136.001": "Create Account: Local Account",
-  "T1222.002": "File & Directory Permissions Modification: Linux",
-  "T1530": "Data from Cloud Storage",
-  "T1546.004": "Event Triggered Execution: Unix Shell Config",
-  "T1548.003": "Abuse Elevation Control: Sudo & Sudo Caching",
-  "T1552.001": "Unsecured Credentials: Credentials In Files",
-  "T1552.003": "Unsecured Credentials: Bash History",
-  "T1580": "Cloud Infrastructure Discovery",
-  "T1595": "Active Scanning",
-  "T1595.003": "Active Scanning: Wordlist Scanning",
+  "T1003.008": "OS Credential Dumping: passwd & shadow", "T1016": "Network Configuration Discovery",
+  "T1021.004": "Remote Services: SSH", "T1033": "System Owner/User Discovery",
+  "T1046": "Network Service Discovery", "T1049": "Network Connections Discovery",
+  "T1053.003": "Scheduled Task/Job: Cron", "T1057": "Process Discovery",
+  "T1059.004": "Command & Scripting: Unix Shell", "T1070.002": "Indicator Removal: System Logs",
+  "T1070.003": "Indicator Removal: Command History", "T1078": "Valid Accounts",
+  "T1078.004": "Valid Accounts: Cloud Accounts", "T1082": "System Information Discovery",
+  "T1083": "File & Directory Discovery", "T1087.001": "Account Discovery: Local Account",
+  "T1098.004": "Account Manipulation: SSH Keys", "T1105": "Ingress Tool Transfer",
+  "T1110": "Brute Force", "T1136.001": "Create Account: Local Account",
+  "T1222.002": "File Permissions Modification", "T1530": "Data from Cloud Storage",
+  "T1546.004": "Triggered Execution: Shell Config", "T1548.003": "Sudo and Sudo Caching",
+  "T1552.001": "Unsecured Credentials In Files", "T1552.003": "Unsecured Credentials: Bash History",
+  "T1580": "Cloud Infrastructure Discovery", "T1595": "Active Scanning",
+  "T1595.003": "Active Scanning: Wordlist",
 };
 
-// MITRE Engage activity name -> official EAC id (engage.mitre.org).
-const ENGAGE_IDS = {
-  "Lures": "EAC0005",
-  "Network Monitoring": "EAC0014",
-  "System Activity Monitoring": "EAC0021",
-};
-
-const state = {
-  attackers: new Map(),
-  events: [],
-  techniques: new Map(), // id -> count
-  counts: { events: 0, alerts: 0 },
-};
-
+const state = { attackers: new Map(), events: [], techniques: new Map(), counts: { events: 0, alerts: 0 } };
 const MAX_FEED = 200;
-
-// ---------------------------------------------------------------- utilities
+const GAUGE_C = 314.16;
 
 const $ = (id) => document.getElementById(id);
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = String(text); return n; }
+function fmtTime(ts) { const d = new Date(ts); if (isNaN(d)) return String(ts || ""); return d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0"); }
 
-function el(tag, cls, text) {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined && text !== null) n.textContent = String(text);
-  return n;
+function band(r) { return r >= 75 ? "hot" : r >= 40 ? "warn" : r > 0 ? "calm" : "idle"; }
+const BAND_VAR = { hot: "var(--hot)", warn: "var(--warn)", calm: "var(--calm)", idle: "var(--ink-faint)" };
+const BAND_WORD = { hot: "critical", warn: "elevated", calm: "watching", idle: "clear" };
+
+function lead() {
+  let b = null;
+  for (const a of state.attackers.values())
+    if (!b || (a.risk_score || 0) > (b.risk_score || 0) ||
+        ((a.risk_score || 0) === (b.risk_score || 0) && (a.max_stage || 0) > (b.max_stage || 0))) b = a;
+  return b;
 }
 
-function fmtTime(ts) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  if (isNaN(d)) return String(ts);
-  return d.toLocaleTimeString([], { hour12: false }) + "." +
-    String(d.getMilliseconds()).padStart(3, "0");
-}
-
-function playbookClass(pb) {
-  return pb === "contain" ? "pb-contain" : pb === "tarpit" ? "pb-tarpit" : "pb-watch";
-}
-
-function riskBand(score) {
-  if (score >= 75) return "risk-crit";
-  if (score >= 40) return "risk-warn";
-  return "risk-low";
-}
-
-// ------------------------------------------------------------------ rendering
-
-function renderAttackers() {
-  const host = $("attackers");
-  host.replaceChildren();
-  const list = [...state.attackers.values()].sort(
-    (a, b) => (b.risk_score || 0) - (a.risk_score || 0)
-  );
-  $("attackers-empty").style.display = list.length ? "none" : "";
+// ------------------------------------------------------------ ambient
+function paintThreat() {
+  const list = [...state.attackers.values()];
+  const max = list.reduce((m, a) => Math.max(m, a.risk_score || 0), 0);
+  const b = band(max);
+  document.documentElement.style.setProperty("--threat", BAND_VAR[b]);
+  document.body.dataset.threat = b;
+  $("meter-fill").style.width = max + "%";
+  $("meter-read").textContent = BAND_WORD[b];
   $("stat-attackers").textContent = list.length;
   $("stat-contained").textContent = list.filter((a) => a.contained_at).length;
+  $("map-hint").textContent = list.length ? `${list.length} in the trap` : "decoys armed";
+}
 
-  for (const a of list) {
-    const card = el("div", "attacker " + (a.contained_at ? "is-contained" : ""));
+// ------------------------------------------------------------ topology
+const DECOY = { admin: "n-admin", ssh: "n-ssh", s3: "n-s3" };
+function decoyForStage(s) { return s >= 5 ? "ssh,s3" : s >= 3 ? "admin,ssh" : s >= 1 ? "admin" : ""; }
+function renderMap() {
+  const a = lead();
+  const reached = a ? (a.max_stage || 0) : 0;
+  const contained = a ? !!a.contained_at : false;
 
-    const head = el("div", "attacker-head");
-    head.append(el("span", "ip", a.ip));
-    const score = el("span", "risk " + riskBand(a.risk_score || 0), a.risk_score ?? 0);
-    head.append(score);
-    card.append(head);
+  for (const k of Object.keys(DECOY)) { const n = $(DECOY[k]); n.classList.remove("reached", "current", "trapped"); }
+  const setReached = (id) => $(id).classList.add("reached");
+  if (reached >= 1) setReached("n-admin");
+  if (reached >= 3) setReached("n-ssh");
+  if (reached >= 5) setReached("n-s3");
 
-    const meta = el("div", "attacker-meta");
-    meta.append(el("span", "pill " + playbookClass(a.playbook), a.playbook || "watch"));
-    if (a.contained_at) meta.append(el("span", "pill pill-contained", "CONTAINED"));
-    meta.append(el("span", "muted", `${(a.techniques || []).length} tech · ${(a.tokens || []).length} tokens`));
-    card.append(meta);
+  // current / trapped node = the decoy owning the top stage
+  const cur = reached >= 5 ? "n-s3" : reached >= 3 ? "n-ssh" : reached >= 1 ? "n-admin" : null;
+  if (cur) { $(cur).classList.remove("reached"); $(cur).classList.add(contained ? "trapped" : "current"); }
 
-    // 6-stage trail progress
-    const trail = el("div", "trail");
-    for (let i = 0; i < TRAIL_STAGES.length; i++) {
-      const seg = el("div", "seg" + ((a.max_stage || 0) > i ? " on" : ""));
-      seg.title = `Stage ${i + 1}: ${TRAIL_STAGES[i]}`;
-      trail.append(seg);
-    }
-    card.append(trail);
-    card.append(el("div", "trail-label muted", `stage ${a.max_stage || 0}/6 · ${TRAIL_STAGES[(a.max_stage || 1) - 1] || "—"}`));
-
-    const actions = el("div", "attacker-actions");
-    const contain = el("button", "btn btn-contain", "Contain");
-    contain.onclick = () => control("contain", a.ip);
-    const release = el("button", "btn btn-release", "Release");
-    release.onclick = () => control("uncontain", a.ip);
-    actions.append(contain, release);
-    card.append(actions);
-
-    host.append(card);
+  const link = (id, lit) => { const e = $(id); e.classList.toggle("lit", lit && !contained); e.classList.toggle("severed", false); };
+  link("lk-a", reached >= 1); link("lk-1", reached >= 3); link("lk-2", reached >= 5);
+  if (contained) {
+    // sever the link into the trapped node
+    const sev = cur === "n-s3" ? "lk-2" : cur === "n-ssh" ? "lk-1" : "lk-a";
+    $(sev).classList.remove("lit"); $(sev).classList.add("severed");
   }
+  $("n-atk").classList.toggle("muted", !a);
 }
 
-function sourceBadge(source) {
-  const map = { "admin-panel": "src-web", "ssh": "src-ssh", "s3": "src-s3" };
-  return el("span", "badge " + (map[source] || ""), source);
+// ------------------------------------------------------------ dossier
+function renderDossier() {
+  const a = lead();
+  const empty = $("dossier-empty"), live = $("dossier-live");
+  if (!a) { empty.hidden = false; live.hidden = true; $("dossier-hint").textContent = "—"; return; }
+  empty.hidden = true; live.hidden = false;
+
+  const risk = a.risk_score || 0, contained = !!a.contained_at, b = band(risk);
+  $("dossier-hint").textContent = BAND_WORD[b];
+  $("d-risk").textContent = risk;
+  $("g-arc").style.strokeDashoffset = GAUGE_C * (1 - risk / 100);
+  $("d-ip").textContent = a.ip;
+  const word = contained ? "contained" : (a.playbook || "watch");
+  const v = $("d-verdict");
+  if (v.textContent !== word) { v.textContent = word; v.classList.toggle("locked", contained); }
+  $("d-stage").textContent = (a.max_stage || 0) + "/6";
+  $("d-tech").textContent = (a.techniques || []).length;
+  $("d-tokens").textContent = (a.tokens || []).length;
+  $("d-contain").onclick = () => control("contain", a.ip);
+  $("d-release").onclick = () => control("uncontain", a.ip);
 }
 
-function feedRow(e) {
-  const row = el("div", "feed-row" + (e.stage ? " stage-" + e.stage : ""));
+function refresh() { paintThreat(); renderMap(); renderDossier(); }
+
+// --------------------------------------------------------------- feed
+const SRC = { "admin-panel": ["src-web", "WEB"], ssh: ["src-ssh", "SSH"], s3: ["src-s3", "S3"] };
+function feedRow(e, fresh) {
+  const row = el("div", "row" + (e.stage ? " s" + e.stage : "") + (fresh ? " fresh" : ""));
   row.append(el("span", "t", fmtTime(e.ts)));
-  row.append(sourceBadge(e.source));
-  row.append(el("span", "etype", e.event_type));
+  const [cls, lab] = SRC[e.source] || ["", e.source];
+  row.append(el("span", "src " + cls, lab));
+  row.append(el("span", "etype", (e.event_type || "").replace(/_/g, " ")));
   row.append(el("span", "asset", e.asset || "—"));
-  if (e.stage) row.append(el("span", "stage-tag", "S" + e.stage));
-  const techs = (e.techniques || []).slice(0, 3);
-  for (const t of techs) {
-    const chip = el("span", "tchip", t);
-    chip.title = ATTACK[t] || t;
-    row.append(chip);
-  }
+  row.append(el("span", "sx", e.stage ? "S" + e.stage : ""));
   return row;
 }
-
 function renderFeed() {
-  const host = $("feed");
-  host.replaceChildren();
-  for (const e of state.events.slice(0, MAX_FEED)) host.append(feedRow(e));
+  const host = $("feed-list"); host.replaceChildren();
+  for (const e of state.events.slice(0, MAX_FEED)) host.append(feedRow(e, false));
   $("stat-events").textContent = state.counts.events;
 }
-
 function pushEvent(e) {
   state.counts.events += 1;
   state.events.unshift(e);
-  if (state.events.length > MAX_FEED * 2) state.events.length = MAX_FEED;
-  // keep newest-first by timestamp (decoys can deliver slightly out of order)
   state.events.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
-  for (const t of e.techniques || []) {
-    state.techniques.set(t, (state.techniques.get(t) || 0) + 1);
-  }
-  if (e.honeytoken_id && (e.event_type === "honeytoken_used" || e.event_type === "file_access")) {
-    pushTheft(e);
-  }
-  renderFeed();
+  if (state.events.length > MAX_FEED * 2) state.events.length = MAX_FEED;
+  for (const t of e.techniques || []) state.techniques.set(t, (state.techniques.get(t) || 0) + 1);
+  if (e.honeytoken_id && (e.event_type === "honeytoken_used" || e.event_type === "file_access")) pushTheft(e);
+  $("stat-events").textContent = state.counts.events;
+  const host = $("feed-list");
+  host.prepend(feedRow(e, true));
+  while (host.childElementCount > MAX_FEED) host.lastElementChild.remove();
   renderTechniques();
 }
-
 function pushTheft(e) {
-  const host = $("theft");
+  const host = $("theft-list");
   const row = el("div", "theft-row");
-  row.append(el("span", "t", fmtTime(e.ts)));
-  row.append(el("span", "token", e.honeytoken_id));
-  row.append(el("span", "asset", e.asset || ""));
-  row.append(el("span", "ip muted", e.src_ip));
+  row.append(el("span", "t", fmtTime(e.ts)), el("span", "tok", e.honeytoken_id), el("span", "loc", e.asset || e.src_ip));
   host.prepend(row);
   while (host.childElementCount > 40) host.lastElementChild.remove();
 }
 
+// -------------------------------------------------------------- alerts
 function pushAlert(a) {
   state.counts.alerts += 1;
   $("stat-alerts").textContent = state.counts.alerts;
-  const host = $("alerts");
+  const host = $("alert-list");
   const row = el("div", "alert sev-" + (a.severity || "low"));
-  row.append(el("span", "sev", (a.severity || "low").toUpperCase()));
-  const body = el("div", "alert-body");
-  body.append(el("div", "alert-title", a.title));
-  body.append(el("div", "alert-meta muted", `${a.src_ip} · ${fmtTime(a.ts)}`));
+  row.append(el("span", "sev", (a.severity || "low").slice(0, 4).toUpperCase()));
+  const body = el("div");
+  body.append(el("div", "alert-title", a.title), el("div", "alert-sub", `${a.src_ip} · ${fmtTime(a.ts)}`));
   row.append(body);
   host.prepend(row);
   while (host.childElementCount > 60) host.lastElementChild.remove();
 }
 
+// ------------------------------------------------------------ responses
 function pushResponse(r) {
-  const host = $("responses");
-  const row = el("div", "response pb-" + (r.playbook || "watch"));
-  row.append(el("span", "t", fmtTime(r.ts)));
-  row.append(el("span", "r-action", r.action));
-  row.append(el("span", "r-ip muted", r.src_ip));
-  const d = r.details || {};
-  const actions = d.actions || {};
-  // containment_sequence: show each sub-step and whether it was real or simulated
-  const steps = [];
-  if (actions.eviction) steps.push("evict:" + (actions.eviction.terminated ?? "?"));
-  if (actions.firewall) steps.push("fw:" + (actions.firewall.backend || "?"));
-  if (actions.snapshot) steps.push("snap:" + (actions.snapshot.backend || "?"));
-  if (d.delay_seconds) steps.push(d.delay_seconds + "s delay");
-  if (d.firewall) steps.push("fw:" + (d.firewall.backend || d.firewall.success));
-  if (steps.length) row.append(el("span", "r-steps", steps.join("  ·  ")));
-  host.prepend(row);
-  while (host.childElementCount > 60) host.lastElementChild.remove();
+  const host = $("resp-list");
+  const resp = el("div", "resp " + (r.playbook || "watch"));
+  const top = el("div", "resp-top");
+  top.append(el("span", "resp-act", (r.action || "").replace(/_/g, " ")), el("span", "resp-ip", r.src_ip));
+  resp.append(top);
+  const d = r.details || {}, acts = d.actions || {};
+  const steps = el("div", "resp-steps");
+  const add = (txt, real) => steps.append(el("span", "step" + (real ? " real" : ""), txt));
+  if (acts.eviction) add(`evicted ${acts.eviction.terminated ?? 0}`, (acts.eviction.terminated || 0) > 0);
+  if (acts.enforcement) { const n = Array.isArray(acts.enforcement) ? acts.enforcement.length : (acts.enforcement.reached || []).length; add(`blocked ${n} decoys`, n > 0); }
+  if (acts.firewall) { const be = acts.firewall.backend || acts.firewall; add(`fw ${be}`, be && be !== "simulated"); }
+  if (acts.snapshot) { const be = acts.snapshot.backend || ""; add(`snapshot ${be}`, be && be !== "simulated"); }
+  if (d.delay_seconds) add(`${d.delay_seconds}s tarpit`, true);
+  if (d.firewall) add("released", true);
+  if (steps.childElementCount) resp.append(steps);
+  host.prepend(resp);
+  while (host.childElementCount > 50) host.lastElementChild.remove();
 }
 
+// ----------------------------------------------------------- techniques
 function renderTechniques() {
-  const host = $("techniques");
-  host.replaceChildren();
+  const host = $("tech-list"); host.replaceChildren();
   const items = [...state.techniques.entries()].sort((a, b) => b[1] - a[1]);
+  $("tech-count").textContent = items.length;
   for (const [id, n] of items) {
-    const chip = el("div", "tech");
-    chip.append(el("span", "tech-id", id));
-    chip.append(el("span", "tech-name", ATTACK[id] || "unmapped technique"));
-    chip.append(el("span", "tech-n", n));
-    host.append(chip);
+    const t = el("div", "tech");
+    t.append(el("span", "tech-id", id), el("span", "tech-name", ATTACK[id] || "technique"), el("span", "tech-n", "×" + n));
+    host.append(t);
   }
 }
 
-function upsertAttacker(a) {
-  state.attackers.set(a.ip, a);
-  renderAttackers();
-}
+function upsertAttacker(a) { state.attackers.set(a.ip, a); refresh(); }
 
-// ------------------------------------------------------------- controls + io
-
+// ------------------------------------------------------------- io
 async function control(kind, ip) {
-  try {
-    const r = await fetch(`/api/${kind === "contain" ? "contain" : "uncontain"}/${encodeURIComponent(ip)}`, {
-      method: "POST",
-    });
-    if (!r.ok) console.warn("control failed", kind, ip, r.status);
-  } catch (err) {
-    console.warn("control error", err);
-  }
+  try { await fetch(`/api/${kind === "contain" ? "contain" : "uncontain"}/${encodeURIComponent(ip)}`, { method: "POST" }); }
+  catch (e) { console.warn("control failed", e); }
 }
-
 async function loadInitial() {
   const [events, alerts, responses, attackers] = await Promise.all([
     fetch("/api/events?limit=200").then((r) => r.json()),
-    fetch("/api/alerts?limit=100").then((r) => r.json()),
-    fetch("/api/responses?limit=100").then((r) => r.json()),
+    fetch("/api/alerts?limit=80").then((r) => r.json()),
+    fetch("/api/responses?limit=60").then((r) => r.json()),
     fetch("/api/attackers").then((r) => r.json()),
   ]);
-
   for (const a of attackers) state.attackers.set(a.ip, a);
-  renderAttackers();
-
-  // events come newest-first from the API
   state.events = events.slice();
   state.counts.events = events.length;
-  for (const e of events) {
-    for (const t of e.techniques || []) state.techniques.set(t, (state.techniques.get(t) || 0) + 1);
-  }
-  renderFeed();
-  renderTechniques();
-
-  // Replay newest-last so prepend leaves the most recent on top, counts stay exact.
-  for (const e of [...events].reverse()) {
-    if (e.honeytoken_id && (e.event_type === "honeytoken_used" || e.event_type === "file_access")) pushTheft(e);
-  }
+  for (const e of events) for (const t of e.techniques || []) state.techniques.set(t, (state.techniques.get(t) || 0) + 1);
+  refresh(); renderFeed(); renderTechniques();
+  for (const e of [...events].reverse()) if (e.honeytoken_id && (e.event_type === "honeytoken_used" || e.event_type === "file_access")) pushTheft(e);
   for (const a of [...alerts].reverse()) pushAlert(a);
   for (const r of [...responses].reverse()) pushResponse(r);
 }
-
-function setConn(ok, text) {
-  const c = $("conn");
-  c.classList.toggle("live", ok);
-  c.classList.toggle("down", !ok);
-  $("conn-text").textContent = text;
-}
-
+function setConn(up, text) { const c = $("conn"); c.classList.toggle("up", up); c.classList.toggle("down", !up); $("conn-text").textContent = text; }
 function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   let backoff = 500;
-
   ws.onopen = () => { setConn(true, "live"); backoff = 500; };
-  ws.onclose = () => {
-    setConn(false, "reconnecting");
-    setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, 8000);
-  };
+  ws.onclose = () => { setConn(false, "reconnecting"); setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 8000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (ev) => {
-    let msg;
-    try { msg = JSON.parse(ev.data); } catch { return; }
-    switch (msg.type) {
-      case "event": pushEvent(msg.data); break;
-      case "alert": pushAlert(msg.data); break;
-      case "response": pushResponse(msg.data); break;
-      case "attacker": upsertAttacker(msg.data); break;
-    }
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === "event") pushEvent(m.data);
+    else if (m.type === "alert") pushAlert(m.data);
+    else if (m.type === "response") pushResponse(m.data);
+    else if (m.type === "attacker") upsertAttacker(m.data);
   };
 }
 
