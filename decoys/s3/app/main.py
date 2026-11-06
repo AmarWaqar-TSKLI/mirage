@@ -6,13 +6,14 @@ All AWS requests, bucket scans, and file downloads are tracked and reported to
 the Mirage controller.
 """
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Request, Response, status
-from mirage_common import Registry
+from mirage_common import EnforcementState, Registry, start_control_server
 
 from .auth import S3Authenticator
 from .reporting import S3Reporter
@@ -23,6 +24,9 @@ log = logging.getLogger("mirage.s3")
 logging.basicConfig(level=logging.INFO)
 
 SERVER_HEADER = "MinIO"
+
+# Containment state pushed from the controller (see mirage_common.control).
+enforcement = EnforcementState()
 
 
 @asynccontextmanager
@@ -47,11 +51,31 @@ async def lifespan(app: FastAPI):
         app.state.auth = S3Authenticator(expected_access_key, expected_secret_key)
     if not hasattr(app.state, "reporter") or app.state.reporter is None:
         app.state.reporter = S3Reporter()
+
+    port = int(os.environ.get("S3_CONTROL_PORT", "8090"))
+    try:
+        start_control_server(enforcement, port)
+    except OSError as e:
+        log.warning("control server not started on %d: %s", port, e)
+
     log.info("s3 decoy ready; accepting access key: %s...", expected_access_key[:8] if expected_access_key else "none")
     yield
 
 
 app = FastAPI(title="Mirage S3 Decoy", lifespan=lifespan, docs_url=None, redoc_url=None)
+
+
+@app.middleware("http")
+async def enforce(request: Request, call_next):
+    ip = request.client.host if request.client else ""
+    if enforcement.is_blocked(ip):
+        return Response(content=xml_error("AccessDenied", "Access Denied", request.url.path),
+                        status_code=status.HTTP_403_FORBIDDEN, media_type="application/xml",
+                        headers={"Server": SERVER_HEADER})
+    delay = enforcement.tarpit_delay(ip)
+    if delay:
+        await asyncio.sleep(delay)
+    return await call_next(request)
 
 
 def _client_ip_port(request: Request) -> tuple[str, Optional[int]]:

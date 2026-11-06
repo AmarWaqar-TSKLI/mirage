@@ -109,3 +109,14 @@ def test_port_forwarding_is_refused(decoy):
     with pytest.raises(paramiko.ChannelException):
         client.get_transport().open_channel("direct-tcpip", ("10.66.0.31", 5432), ("127.0.0.1", 0))
     client.close()
+
+
+def test_blocked_ip_cannot_login_even_with_correct_password(decoy):
+    # Containment blocks the attacker's IP; re-login is refused at the door.
+    decoy.enforcement.block("127.0.0.1")
+    with pytest.raises(paramiko.AuthenticationException):
+        connect(decoy, CREDS["password"])
+    # Releasing lets a legitimate reconnect succeed again.
+    decoy.enforcement.clear("127.0.0.1")
+    client = connect(decoy, CREDS["password"])
+    client.close()

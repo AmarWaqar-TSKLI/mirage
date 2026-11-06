@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from .decoy_control import DecoyControl
 from .evict import SessionEvictor
 from .firewall import FirewallManager
 from .forensics import SnapshotManager
@@ -23,6 +24,7 @@ class ResponseEngine:
         evictor: Optional[SessionEvictor] = None,
         firewall: Optional[FirewallManager] = None,
         snapshots: Optional[SnapshotManager] = None,
+        enforcer: Optional[DecoyControl] = None,
         publisher: Optional[Any] = None,
     ):
         self.store = store
@@ -31,6 +33,9 @@ class ResponseEngine:
         self.evictor = evictor or SessionEvictor()
         self.firewall = firewall or FirewallManager()
         self.snapshots = snapshots or SnapshotManager()
+        # Pushes block/tarpit/clear to the decoys. Default reads decoy control
+        # URLs from env (empty in tests, so no network calls there).
+        self.enforcer = enforcer or DecoyControl()
         # Optional live fan-out to the dashboard (broadcast.Publisher). None in tests.
         self.publisher = publisher
 
@@ -69,7 +74,11 @@ class ResponseEngine:
         evict_res = self.evictor.terminate_sessions(ip)
         actions["eviction"] = evict_res
 
-        # 2. Firewall Banning (nftables / iptables)
+        # 2. Decoy-level block: the real lockout. Every decoy refuses this IP, so
+        # re-login and further HTTP/S3 use fail. Also kicks live sessions.
+        actions["enforcement"] = self.enforcer.block(ip, duration_seconds=self.policy.ban_duration_seconds)
+
+        # 3. Host firewall ban (controller nftables/iptables; simulated off-lab).
         if self.policy.enable_firewall:
             fw_res = self.firewall.ban(ip, duration_seconds=self.policy.ban_duration_seconds)
             actions["firewall"] = fw_res
@@ -107,13 +116,14 @@ class ResponseEngine:
     def execute_tarpit(self, ip: str, delay: float = 3.0) -> Dict[str, Any]:
         """Applies tarpit throttling to slow down attacker enumeration."""
         ts = datetime.now(timezone.utc).isoformat()
+        enforce_res = self.enforcer.tarpit(ip, delay)
         response_record = {
             "ts": ts,
             "src_ip": ip,
             "playbook": Playbook.TARPIT,
             "action": "throttle_connection",
             "status": "active",
-            "details": {"delay_seconds": delay},
+            "details": {"delay_seconds": delay, "enforcement": enforce_res},
         }
         with self.store.lock:
             saved = self.store.insert_response(response_record)
@@ -129,8 +139,9 @@ class ResponseEngine:
         return saved
 
     def uncontain(self, ip: str) -> Dict[str, Any]:
-        """Operator release: lift the firewall ban and clear the attacker's contained state."""
+        """Operator release: lift the firewall ban, clear decoy enforcement, and reset state."""
         fw = self.firewall.unban(ip)
+        enforce_res = self.enforcer.clear(ip)
         ts = datetime.now(timezone.utc).isoformat()
         response_record = {
             "ts": ts,
@@ -138,7 +149,7 @@ class ResponseEngine:
             "playbook": Playbook.WATCH,
             "action": "release",
             "status": "completed",
-            "details": {"firewall": fw},
+            "details": {"firewall": fw, "enforcement": enforce_res},
         }
         with self.store.lock:
             saved = self.store.insert_response(response_record)

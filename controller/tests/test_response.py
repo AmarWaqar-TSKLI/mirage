@@ -59,6 +59,73 @@ class MockSnapshots:
         return {"success": True, "image_tag": f"mock/{container_name}:{src_ip}"}
 
 
+class MockEnforcer:
+    def __init__(self):
+        self.calls = []
+
+    def block(self, ip, duration_seconds=0.0):
+        self.calls.append(("block", ip))
+        return {"mode": "block", "reached": ["ssh", "admin", "s3"], "failed": [], "decoys": 3}
+
+    def tarpit(self, ip, delay_seconds):
+        self.calls.append(("tarpit", ip))
+        return {"mode": "tarpit", "reached": ["ssh", "admin", "s3"], "failed": [], "decoys": 3}
+
+    def clear(self, ip):
+        self.calls.append(("clear", ip))
+        return {"mode": "clear", "reached": ["ssh", "admin", "s3"], "failed": [], "decoys": 3}
+
+
+def _engine(store, **kw):
+    kw.setdefault("evictor", MockEvictor())
+    kw.setdefault("firewall", MockFirewall())
+    kw.setdefault("snapshots", MockSnapshots())
+    kw.setdefault("enforcer", MockEnforcer())
+    return ResponseEngine(store=store, **kw)
+
+
+def _attacker(ip="10.66.0.50", **over):
+    base = {
+        "ip": ip, "first_seen": "2026-11-06T12:00:00", "last_seen": "2026-11-06T12:05:00",
+        "event_count": 10, "max_stage": 5, "risk_score": 90, "playbook": "watch",
+        "contained_at": None, "techniques": ["T1078"], "tokens": ["ht-ssh-password"],
+    }
+    base.update(over)
+    return base
+
+
+def test_containment_blocks_every_decoy():
+    store = Store(":memory:")
+    enforcer = MockEnforcer()
+    eng = _engine(store, enforcer=enforcer)
+    store.upsert_attacker(_attacker(max_stage=5, risk_score=90))
+    eng.execute_containment("10.66.0.50", reason="test")
+    assert ("block", "10.66.0.50") in enforcer.calls
+    saved = store.recent("responses", 10, "10.66.0.50")[0]
+    assert saved["details"]["actions"]["enforcement"]["decoys"] == 3
+
+
+def test_tarpit_pushes_tarpit_to_decoys():
+    store = Store(":memory:")
+    enforcer = MockEnforcer()
+    eng = _engine(store, enforcer=enforcer)
+    store.upsert_attacker(_attacker(max_stage=2, risk_score=50))
+    eng.execute_tarpit("10.66.0.50", delay=2.0)
+    assert ("tarpit", "10.66.0.50") in enforcer.calls
+
+
+def test_uncontain_clears_block_and_state():
+    store = Store(":memory:")
+    enforcer = MockEnforcer()
+    eng = _engine(store, enforcer=enforcer)
+    store.upsert_attacker(_attacker(max_stage=6, risk_score=100))
+    eng.execute_containment("10.66.0.50")
+    assert store.get_attacker("10.66.0.50")["contained_at"] is not None
+    eng.uncontain("10.66.0.50")
+    assert ("clear", "10.66.0.50") in enforcer.calls
+    assert store.get_attacker("10.66.0.50")["contained_at"] is None
+
+
 def test_risk_score_calculation():
     # Stage 0, no tokens, no techniques
     assert calculate_risk_score(max_stage=0, techniques=[], tokens=[], event_count=1) == 0

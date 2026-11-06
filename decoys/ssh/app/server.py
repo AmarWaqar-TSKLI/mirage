@@ -19,9 +19,9 @@ from pathlib import Path
 import paramiko
 
 from mirage_common import Event, EventClient, EventType, Registry, Source
+from mirage_common import EnforcementState, start_control_server
 
 from .classify import classify
-from .control import start_control_server
 from .fs import AWS_CREDENTIALS, FileSystem
 from .shell import Shell
 
@@ -89,12 +89,34 @@ class Decoy:
         self.host_key = load_host_key(data_dir / "ssh_host_rsa_key")
         self.sessions: dict[str, "Connection"] = {}
         self.lock = threading.Lock()
+        # Containment state pushed from the controller: blocked/tarpitted IPs.
+        self.enforcement = EnforcementState()
 
     def serve(self, sock: socket.socket) -> None:
         """Accept connections forever, one thread per connection."""
         while True:
             client, addr = sock.accept()
             threading.Thread(target=Connection(self, client, addr).handle, daemon=True).start()
+
+    def list_sessions(self) -> list[dict]:
+        with self.lock:
+            return [{"session_id": s.session_id, "src_ip": s.ip, "src_port": s.port, "username": s.username}
+                    for s in self.sessions.values()]
+
+    def kick(self, ip: str | None = None, session_id: str | None = None) -> int:
+        """Terminate live sessions matching ip or session_id (both None = all). Returns the count."""
+        with self.lock:
+            targets = [c for sid, c in self.sessions.items()
+                       if (ip and c.ip == ip) or (session_id and sid == session_id)
+                       or (not ip and not session_id)]
+        kicked = 0
+        for conn in targets:
+            try:
+                conn.notify_and_kick()
+                kicked += 1
+            except Exception:
+                log.exception("failed to kick session %s", conn.session_id)
+        return kicked
 
 
 class Connection(paramiko.ServerInterface):
@@ -128,6 +150,18 @@ class Connection(paramiko.ServerInterface):
         return "password,publickey"
 
     def check_auth_password(self, username, password):
+        # A contained IP is refused at the door, even with the correct planted
+        # password. This closes the login-time containment gap: containment can
+        # fire on the very login event, before any shell session exists to kick.
+        if self.decoy.enforcement.is_blocked(self.ip):
+            self.report(EventType.LOGIN_ATTEMPT, asset=username, attack_techniques=["T1110"],
+                        details={"username": username, "success": False, "method": "password", "contained": True})
+            return paramiko.AUTH_FAILED
+
+        delay = self.decoy.enforcement.tarpit_delay(self.ip)
+        if delay:
+            time.sleep(delay)
+
         ok = username == self.decoy.username and password == self.decoy.password
         # Only a successful login with the planted password touches the honeytoken.
         self.report(EventType.LOGIN_ATTEMPT, asset=username, honeytoken_id=SSH_TOKEN if ok else None,
@@ -193,6 +227,12 @@ class Connection(paramiko.ServerInterface):
              "started": datetime.now(timezone.utc).isoformat()})
         with self.decoy.lock:
             self.decoy.sessions[self.session_id] = self
+        # If containment landed between auth and here (the login-time race), kick now.
+        if self.decoy.enforcement.is_blocked(self.ip):
+            with self.decoy.lock:
+                self.decoy.sessions.pop(self.session_id, None)
+            self.notify_and_kick()
+            return
         self.report(EventType.SESSION_START, asset=self.username,
                     details={"mode": "exec" if self.exec_command else "shell"})
 
@@ -262,6 +302,10 @@ class Connection(paramiko.ServerInterface):
 
     def _run(self, shell: Shell, line: str) -> str:
         """Run one command line, record it, report it, and return terminal-ready output."""
+        # Tarpit: a slowed attacker's every command drags, so their tools stall.
+        delay = self.decoy.enforcement.tarpit_delay(self.ip)
+        if delay:
+            time.sleep(delay)
         output = shell.run(line)
         if line.strip():
             if self.recorder:  # may already be closed if containment kicked the session
@@ -310,7 +354,12 @@ def main() -> None:
     decoy = Decoy(registry, client.submit, Path(os.environ.get("MIRAGE_DATA_DIR", "/data")))
 
     control_port = int(os.environ.get("SSH_CONTROL_PORT", "8022"))
-    start_control_server(decoy, control_port)
+    start_control_server(
+        decoy.enforcement,
+        control_port,
+        session_lister=decoy.list_sessions,
+        session_terminator=decoy.kick,
+    )
 
     port = int(os.environ.get("SSH_PORT", "22"))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

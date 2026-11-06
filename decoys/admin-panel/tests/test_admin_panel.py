@@ -71,3 +71,12 @@ def test_login_always_fails_and_records_credentials(client, sent):
 def test_root_redirects_to_login(client, sent):
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/login"
+
+
+def test_contained_ip_is_refused(client):
+    from app import main
+    main.enforcement.block("10.66.0.50")
+    try:
+        assert client.get("/robots.txt").status_code == 403
+    finally:
+        main.enforcement.clear("10.66.0.50")

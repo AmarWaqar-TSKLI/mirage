@@ -4,6 +4,7 @@ robots.txt points at /backup/, which lists an exposed .env backup holding
 the SSH password for the next decoy. Every request is reported to the controller.
 """
 
+import asyncio
 import logging
 import os
 from urllib.parse import parse_qs
@@ -12,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from mirage_common import Event, EventClient, EventType, Registry, Source
+from mirage_common import EnforcementState, Event, EventClient, EventType, Registry, Source, start_control_server
 
 from . import pages
 
@@ -26,7 +27,20 @@ SERVER_HEADER = "nginx/1.24.0 (Ubuntu)"
 registry = Registry.load(os.environ.get("MIRAGE_HONEYTOKENS", "/etc/mirage/honeytokens.json"))
 ENV_BACKUP = pages.ENV_BACKUP.format(**registry.get(SSH_TOKEN).value)
 
+# Containment state pushed from the controller (see mirage_common.control).
+enforcement = EnforcementState()
+
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.on_event("startup")
+def _start_control() -> None:
+    port = int(os.environ.get("ADMIN_CONTROL_PORT", "8020"))
+    try:
+        start_control_server(enforcement, port)
+    except OSError as e:
+        log.warning("control server not started on %d: %s", port, e)
+
 
 _client: EventClient | None = None
 
@@ -45,6 +59,14 @@ def mark(request: Request, **fields) -> None:
 
 @app.middleware("http")
 async def report(request: Request, call_next):
+    ip = request.client.host if request.client else ""
+    # Containment: a blocked IP is refused outright; a tarpitted one is slowed.
+    if enforcement.is_blocked(ip):
+        return PlainTextResponse("", status_code=403, headers={"Server": SERVER_HEADER})
+    delay = enforcement.tarpit_delay(ip)
+    if delay:
+        await asyncio.sleep(delay)
+
     request.state.event = {}
     response = await call_next(request)
     response.headers["Server"] = SERVER_HEADER

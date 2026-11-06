@@ -118,3 +118,12 @@ def test_non_existent_bucket_or_key(client):
     res2 = client.get("/corp-backups/non-existent.txt", headers=headers)
     assert res2.status_code == 404
     assert "<Code>NoSuchKey</Code>" in res2.text
+
+
+def test_contained_ip_is_refused(client):
+    from app.main import enforcement
+    enforcement.block("10.66.0.50")
+    try:
+        assert client.get("/").status_code == 403
+    finally:
+        enforcement.clear("10.66.0.50")

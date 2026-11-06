@@ -20,6 +20,9 @@ services:
       MIRAGE_INGEST_TOKEN: ${MIRAGE_INGEST_TOKEN:?set MIRAGE_INGEST_TOKEN in .env}
       MIRAGE_DB_PATH: /data/mirage.db
       MIRAGE_HONEYTOKENS: /etc/mirage/honeytokens.json
+      # Decoy control servers the containment engine pushes block/tarpit/clear to.
+      MIRAGE_SSH_CONTROL_URL: http://10.66.0.21:8022
+      MIRAGE_DECOY_CONTROL_URLS: http://10.66.0.20:8020,http://10.66.0.21:8022,http://10.66.0.22:8090
     volumes:
       - controller-data:/data
       - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
