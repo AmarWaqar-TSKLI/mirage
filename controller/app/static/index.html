@@ -3,193 +3,249 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mirage · Deception Grid</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='34' fill='none' stroke='%2345e0d0' stroke-width='7'/><circle cx='50' cy='50' r='9' fill='%23ff3d71'/></svg>" />
+  <title>Mirage · deception lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='36' fill='none' stroke='%23ffc247' stroke-width='6'/><circle cx='50' cy='50' r='10' fill='%23ff4438'/></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=6" />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=17" />
 </head>
-<body data-threat="idle">
-  <canvas id="bg" class="bg-canvas"></canvas>
-  <div class="aura" id="aura"></div>
+<body data-band="idle">
+  <div class="atmo" aria-hidden="true"></div>
 
-  <aside class="rail">
-    <span class="sigil" aria-hidden="true"><span class="sigil-core"></span></span>
-    <nav class="rail-nav">
-      <a href="#map" class="rail-ico active" title="Grid" aria-label="Grid"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></a>
-      <a href="#feed-panel" class="rail-ico" title="Feed" aria-label="Feed"><svg viewBox="0 0 24 24"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg></a>
-      <a href="#dossier" class="rail-ico" title="Intruders" aria-label="Intruders"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></a>
-      <a href="#responses" class="rail-ico" title="Response" aria-label="Response"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></a>
-    </nav>
-    <span class="rail-foot" title="Isolated lab"></span>
-  </aside>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><i></i></span>
+      <span class="wordmark">Mirage</span>
+      <span class="brand-sub">Deception lab · 10.66.0.0/24 · active response</span>
+    </div>
 
-  <div class="threatline" id="threatline"></div>
-
-  <div class="shell">
-    <header class="topbar glass">
-      <div class="brand-text">
-        <h1>Mirage</h1>
-        <p>Deception grid · isolated lab 10.66.0.0/24</p>
+    <div class="ladder-wrap" title="Highest risk across intruders. Bands: watch under 40, tarpit 40 to 74, contain 75 and up">
+      <span class="ladder-k">Risk</span>
+      <div class="ladder">
+        <div class="ladder-band b1"></div><div class="ladder-band b2"></div><div class="ladder-band b3"></div>
+        <div class="ladder-pin" id="ladder-pin"></div>
       </div>
-      <div class="meter" title="Highest active threat">
-        <span class="meter-label">threat level</span>
-        <div class="meter-track"><div class="meter-fill" id="meter-fill"></div></div>
-        <span class="meter-read" id="meter-read">clear</span>
-      </div>
-      <div class="status">
-        <div class="stat"><span class="stat-num" id="stat-attackers">0</span><span class="stat-key">in the trap</span></div>
-        <div class="stat"><span class="stat-num" id="stat-events">0</span><span class="stat-key">events</span></div>
-        <div class="stat"><span class="stat-num" id="stat-alerts">0</span><span class="stat-key">alerts</span></div>
-        <div class="stat"><span class="stat-num hot" id="stat-contained">0</span><span class="stat-key">contained</span></div>
-        <div class="live" id="conn"><span class="live-dot"></span><span id="conn-text">linking</span></div>
-      </div>
-    </header>
+      <span class="ladder-read mono" id="ladder-read">0 · clear</span>
+    </div>
 
-    <section class="hero" id="map">
-      <div class="panel glass map-panel">
-        <div class="panel-head"><h2>Lab topology</h2><span class="hint" id="map-hint">decoys armed</span></div>
-        <div class="map-wrap">
-          <svg class="topo" viewBox="0 0 1000 420" preserveAspectRatio="xMidYMid meet" id="topo">
-            <defs>
-              <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-                <feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-              <radialGradient id="nodefill" cx="50%" cy="35%" r="75%">
-                <stop offset="0%" stop-color="#1a2230"/><stop offset="100%" stop-color="#0b0f16"/>
-              </radialGradient>
-            </defs>
+    <div class="top-right">
+      <span class="clock mono" id="clock">00:00:00</span>
+      <span class="live" id="conn"><i class="live-dot"></i><span id="conn-text">linking</span></span>
+    </div>
+  </header>
 
-            <!-- monitoring links controller -> decoys -->
-            <g class="mon">
-              <path d="M500 96 C 460 150 420 170 360 180"/>
-              <path d="M500 96 C 540 160 600 190 620 240"/>
-              <path d="M500 96 C 640 150 780 150 880 170"/>
-            </g>
+  <main class="page">
 
-            <!-- trail links (bezier) -->
-            <path class="trail-link" id="lk-a" d="M150 230 C 230 230 270 185 352 182"/>
-            <path class="trail-link" id="lk-1" d="M368 188 C 470 210 520 240 600 248"/>
-            <path class="trail-link" id="lk-2" d="M640 242 C 740 230 800 185 872 178"/>
-            <circle class="spark" id="sp-a" r="3.2"/>
-            <circle class="spark" id="sp-1" r="3.2"/>
-            <circle class="spark" id="sp-2" r="3.2"/>
+    <!-- ============================== hero: the lab as a living floor -->
+    <section class="hero" id="hero" aria-label="Lab topology">
+      <canvas id="net" class="net"></canvas>
 
-            <!-- controller -->
-            <g class="dnode ctrl" id="n-ctrl" transform="translate(500,66)">
-              <rect x="-74" y="-28" width="148" height="56" rx="12"/>
-              <circle class="n-led" cx="-56" cy="0" r="4"/>
-              <text class="n-name" x="-42" y="-3" text-anchor="start">Controller</text>
-              <text class="n-ip" x="-42" y="14" text-anchor="start">10.66.0.10 · brain</text>
-            </g>
-            <!-- attacker -->
-            <g class="dnode atk" id="n-atk" transform="translate(96,230)">
-              <rect x="-74" y="-32" width="132" height="64" rx="14"/>
-              <circle class="n-led" cx="-54" cy="-8" r="4"/>
-              <text class="n-name" x="-40" y="-9" text-anchor="start">Intruder</text>
-              <text class="n-ip" x="-40" y="9" text-anchor="start">10.66.0.50</text>
-              <text class="n-stg" x="-40" y="24" text-anchor="start">hostile</text>
-            </g>
-            <!-- admin -->
-            <g class="dnode decoy" id="n-admin" transform="translate(360,180)">
-              <rect x="-62" y="-32" width="124" height="64" rx="14"/>
-              <circle class="n-led" cx="-44" cy="-10" r="4"/>
-              <text class="n-name" x="-30" y="-10" text-anchor="start">Admin panel</text>
-              <text class="n-ip" x="-30" y="7" text-anchor="start">10.66.0.20</text>
-              <text class="n-stg" x="-30" y="23" text-anchor="start">stages 1–2</text>
-            </g>
-            <!-- ssh -->
-            <g class="dnode decoy" id="n-ssh" transform="translate(620,248)">
-              <rect x="-62" y="-32" width="124" height="64" rx="14"/>
-              <circle class="n-led" cx="-44" cy="-10" r="4"/>
-              <text class="n-name" x="-30" y="-10" text-anchor="start">SSH server</text>
-              <text class="n-ip" x="-30" y="7" text-anchor="start">10.66.0.21</text>
-              <text class="n-stg" x="-30" y="23" text-anchor="start">stages 3–4</text>
-            </g>
-            <!-- s3 -->
-            <g class="dnode decoy" id="n-s3" transform="translate(880,172)">
-              <rect x="-62" y="-32" width="124" height="64" rx="14"/>
-              <circle class="n-led" cx="-44" cy="-10" r="4"/>
-              <text class="n-name" x="-30" y="-10" text-anchor="start">S3 bucket</text>
-              <text class="n-ip" x="-30" y="7" text-anchor="start">10.66.0.22</text>
-              <text class="n-stg" x="-30" y="23" text-anchor="start">stages 5–6</text>
-            </g>
-            <!-- legit -->
-            <g class="dnode legit" id="n-legit" transform="translate(360,356)">
-              <rect x="-70" y="-20" width="140" height="40" rx="10"/>
-              <text class="n-name" y="-2" text-anchor="middle">Real intranet</text>
-              <text class="n-ip" y="12" text-anchor="middle">10.66.0.30 · benign traffic</text>
-            </g>
-          </svg>
-
-          <div class="pulse-strip">
-            <div class="pulse-label">intrusion pulse<span id="pulse-rate">0 ev/s</span></div>
-            <canvas id="wave" class="wave"></canvas>
-          </div>
+      <div class="tiles" id="tiles" aria-hidden="false">
+        <div class="tile t-atk" id="tile-atk">
+          <span class="tile-role">Intruder</span>
+          <span class="tile-name mono" id="atk-ip">none yet</span>
+          <span class="tile-state" id="atk-state">no contact</span>
+        </div>
+        <div class="tile t-decoy" id="tile-admin">
+          <span class="tile-role">Decoy · stages 1 to 2</span>
+          <span class="tile-name">Admin panel</span>
+          <span class="tile-ip mono">10.66.0.20</span>
+          <span class="tile-state" id="st-admin">armed</span>
+          <span class="tile-count mono" id="ct-admin">0</span>
+        </div>
+        <div class="tile t-decoy" id="tile-ssh">
+          <span class="tile-role">Decoy · stages 3 to 4</span>
+          <span class="tile-name">SSH server</span>
+          <span class="tile-ip mono">10.66.0.21</span>
+          <span class="tile-state" id="st-ssh">armed</span>
+          <span class="tile-count mono" id="ct-ssh">0</span>
+        </div>
+        <div class="tile t-decoy" id="tile-s3">
+          <span class="tile-role">Decoy · stages 5 to 6</span>
+          <span class="tile-name">S3 bucket</span>
+          <span class="tile-ip mono">10.66.0.22</span>
+          <span class="tile-state" id="st-s3">armed</span>
+          <span class="tile-count mono" id="ct-s3">0</span>
+        </div>
+        <div class="tile t-ctrl" id="tile-ctrl">
+          <span class="tile-role">Controller</span>
+          <span class="tile-name">Mirage brain</span>
+          <span class="tile-ip mono">10.66.0.10</span>
+          <span class="tile-state" id="st-ctrl">watching 3 decoys</span>
+        </div>
+        <div class="tile t-legit" id="tile-legit">
+          <span class="tile-role">Real intranet</span>
+          <span class="tile-name">Staff portal</span>
+          <span class="tile-ip mono">10.66.0.30</span>
+          <span class="tile-state">benign traffic · never touches a decoy</span>
         </div>
       </div>
 
-      <div class="panel glass dossier" id="dossier">
-        <div class="panel-head"><h2>Intruder dossier</h2><span class="hint" id="dossier-hint">—</span></div>
-        <div class="dossier-body" id="dossier-body">
-          <div class="dossier-empty" id="dossier-empty">No intruder in the trap. Decoys watching.</div>
-          <div class="dossier-live" id="dossier-live" hidden>
-            <div class="gauge">
-              <svg viewBox="0 0 120 120">
-                <circle class="g-track" cx="60" cy="60" r="50"/>
-                <circle class="g-arc" id="g-arc" cx="60" cy="60" r="50" transform="rotate(-90 60 60)"/>
-              </svg>
-              <div class="gauge-c"><span class="gauge-num" id="d-risk">0</span><span class="gauge-k">risk</span></div>
-            </div>
-            <div class="dossier-id">
-              <span class="d-ip" id="d-ip">—</span>
-              <span class="d-verdict" id="d-verdict">watch</span>
-            </div>
-            <div class="d-stats">
-              <div><span id="d-stage">0/6</span><label>trail stage</label></div>
-              <div><span id="d-tech">0</span><label>techniques</label></div>
-              <div><span id="d-tokens">0</span><label>tokens stolen</label></div>
-            </div>
-            <div class="d-actions">
-              <button class="btn btn-contain" id="d-contain">Contain now</button>
-              <button class="btn btn-release" id="d-release">Release</button>
-            </div>
-          </div>
+      <div class="hero-head">
+        <p class="kicker" id="hero-kicker">Isolated lab · 3 decoys · 6-stage breadcrumb trail</p>
+        <h1 class="headline" id="hero-line">Decoys armed. Nothing in the trap.</h1>
+      </div>
+
+      <aside class="intruder glass" id="intruder">
+        <div class="int-head">
+          <span class="int-label">Intruder</span>
+          <span class="int-seen mono" id="int-seen">not seen</span>
         </div>
+        <div class="int-ip display" id="int-ip">0.0.0.0</div>
+        <div class="int-verdict" id="int-verdict"><i></i><span id="int-verdict-word">decoys armed</span></div>
+
+        <div class="int-risk">
+          <div class="risk-top"><span class="risk-num display" id="int-risk">0</span><span class="risk-k">risk<br/>of 100</span></div>
+          <div class="risk-bar"><div class="risk-fill" id="risk-fill"></div><i class="th" style="left:40%"></i><i class="th" style="left:75%"></i></div>
+          <div class="risk-keys"><span>watch</span><span>tarpit</span><span>contain</span></div>
+        </div>
+
+        <div class="int-trail">
+          <div class="int-trail-top"><span>Trail</span><span class="mono" id="int-stage-word">stage 0 of 6</span></div>
+          <div class="segs" id="int-segs"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+
+        <dl class="int-facts">
+          <div><dt>events</dt><dd class="mono" id="int-events">0</dd></div>
+          <div><dt>techniques</dt><dd class="mono" id="int-tech">0</dd></div>
+          <div><dt>tokens stolen</dt><dd class="mono" id="int-tokens">0</dd></div>
+        </dl>
+
+        <div class="int-actions">
+          <button class="btn btn-contain" id="btn-contain" type="button">Contain now</button>
+          <button class="btn btn-release" id="btn-release" type="button">Release</button>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ============================== KPI strip -->
+    <section class="kpis" aria-label="Key numbers">
+      <div class="kpi glass">
+        <span class="kpi-k">In the trap</span>
+        <span class="kpi-v display" id="k-trap">0</span>
+        <span class="kpi-s mono" id="k-trap-s">decoys armed</span>
+      </div>
+      <div class="kpi glass">
+        <span class="kpi-k">Events</span>
+        <span class="kpi-v display" id="k-events">0</span>
+        <span class="kpi-s mono" id="k-events-s">0 ev/s peak</span>
+        <canvas class="spark" id="sp-events" width="92" height="30"></canvas>
+      </div>
+      <div class="kpi glass">
+        <span class="kpi-k">Alerts</span>
+        <span class="kpi-v display" id="k-alerts">0</span>
+        <span class="kpi-s mono" id="k-alerts-s">0 high or worse</span>
+        <canvas class="spark" id="sp-alerts" width="110" height="30"></canvas>
+      </div>
+      <div class="kpi glass">
+        <span class="kpi-k">Highest risk</span>
+        <span class="kpi-v display" id="k-risk">0</span>
+        <span class="kpi-s mono" id="k-risk-s">clear</span>
+        <canvas class="spark" id="sp-risk" width="110" height="30"></canvas>
+      </div>
+      <div class="kpi glass">
+        <span class="kpi-k">Contained</span>
+        <span class="kpi-v display" id="k-contained">0</span>
+        <span class="kpi-s mono" id="k-contained-s">no ban active</span>
+        <div class="decoy-blocks" id="k-blocks"><i></i><i></i><i></i></div>
+      </div>
+      <div class="kpi glass">
+        <span class="kpi-k">Time to contain</span>
+        <span class="kpi-v display" id="k-ttc">·</span>
+        <span class="kpi-s mono" id="k-ttc-s">from first contact</span>
+        <span class="kpi-s mono" id="k-ttd-s">detect lag ·</span>
       </div>
     </section>
 
-    <section class="grid">
-      <div class="panel glass fill" id="feed-panel">
-        <div class="panel-head"><h2>Live feed</h2><span class="hint">newest first</span></div>
-        <div id="feed-list" class="feed"></div>
-      </div>
-
-      <div class="col">
-        <div class="panel glass" id="responses">
-          <div class="panel-head"><h2>Response log</h2></div>
-          <div id="resp-list" class="responses"></div>
+    <!-- ============================== trail + theft -->
+    <section class="row row-trail">
+      <div class="panel glass trail-panel">
+        <div class="panel-head">
+          <h2>Breadcrumb trail</h2>
+          <span class="meta mono" id="trail-meta">no intruder</span>
         </div>
-        <div class="panel glass grow">
-          <div class="panel-head"><h2>Alerts</h2></div>
-          <div id="alert-list" class="alerts"></div>
+        <div class="trail" id="trail">
+          <div class="trail-line"><i class="trail-fill" id="trail-fill"></i><i class="trail-cut" id="trail-cut" hidden></i></div>
+          <ol class="stages" id="stages"></ol>
         </div>
       </div>
 
-      <div class="col">
-        <div class="panel glass">
-          <div class="panel-head"><h2>Credential theft</h2></div>
-          <div id="theft-list" class="theft"></div>
+      <div class="panel glass theft-panel">
+        <div class="panel-head">
+          <h2>Credential theft</h2>
+          <span class="meta mono" id="theft-meta">0 of 6 honeytokens</span>
         </div>
-        <div class="panel glass grow">
-          <div class="panel-head"><h2>Techniques observed</h2><span class="hint" id="tech-count">0</span></div>
-          <div id="tech-list" class="techniques"></div>
-        </div>
+        <div class="theft" id="theft-list"></div>
+        <div class="empty" id="theft-empty">Nothing stolen yet.</div>
       </div>
     </section>
-  </div>
 
-  <script src="/static/app.js?v=6"></script>
+    <!-- ============================== timeline + tactics + techniques -->
+    <section class="row row-charts">
+      <div class="panel glass chart-panel">
+        <div class="panel-head">
+          <h2>Campaign timeline</h2>
+          <span class="meta">
+            <span class="leg"><i class="c-admin"></i>admin panel</span>
+            <span class="leg"><i class="c-ssh"></i>ssh</span>
+            <span class="leg"><i class="c-s3"></i>s3</span>
+            <span class="leg"><i class="c-cut"></i>trap sprang</span>
+          </span>
+        </div>
+        <div class="chart-wrap"><canvas id="timeline" class="timeline"></canvas></div>
+        <div class="empty" id="chart-empty">Events per second on each decoy will draw here.</div>
+      </div>
+
+      <div class="panel glass tactics-panel">
+        <div class="panel-head">
+          <h2>Tactics observed</h2>
+          <span class="meta mono" id="tactics-meta">0 of 12</span>
+        </div>
+        <div class="tactics" id="tactics"></div>
+      </div>
+
+      <div class="panel glass tech-panel">
+        <div class="panel-head">
+          <h2>Techniques</h2>
+          <span class="meta mono" id="tech-count">0</span>
+        </div>
+        <div class="techniques" id="tech-list"></div>
+        <div class="empty" id="tech-empty">No ATT&amp;CK techniques labelled yet.</div>
+      </div>
+    </section>
+
+    <!-- ============================== streams -->
+    <section class="row row-streams">
+      <div class="panel glass feed-panel">
+        <div class="panel-head">
+          <h2>Live feed</h2>
+          <span class="meta mono" id="feed-meta">newest first</span>
+        </div>
+        <div class="feed" id="feed-list"></div>
+        <div class="empty" id="feed-empty">Waiting for the first event.</div>
+      </div>
+
+      <div class="panel glass alerts-panel">
+        <div class="panel-head">
+          <h2>Alerts</h2>
+          <span class="meta mono" id="alerts-meta">0</span>
+        </div>
+        <div class="alerts" id="alert-list"></div>
+        <div class="empty" id="alerts-empty">No alerts.</div>
+      </div>
+
+      <div class="panel glass resp-panel">
+        <div class="panel-head">
+          <h2>Response log</h2>
+          <span class="meta"><span class="leg"><i class="c-real"></i>real</span><span class="leg"><i class="c-sim"></i>simulated</span></span>
+        </div>
+        <div class="responses" id="resp-list"></div>
+        <div class="empty" id="resp-empty">No response yet.</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js?v=17"></script>
 </body>
 </html>
