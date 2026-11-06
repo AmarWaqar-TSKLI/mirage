@@ -5,10 +5,11 @@ import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from mirage_common import Event, Registry
@@ -22,6 +23,32 @@ log = logging.getLogger("mirage.controller")
 logging.basicConfig(level=logging.INFO)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# The attacker shares the lab network with the controller. Everything except
+# event ingest (token-gated) and the health check must be invisible to a
+# lab-side client, so the dashboard, the API reads and the manual controls
+# answer only on the mgmt side (the host). Decoys sit in the lab too but only
+# ever POST events, so they are unaffected.
+LAB_SUBNET = os.environ.get("MIRAGE_LAB_SUBNET", "10.66.0.0/24")
+try:
+    _LAB_NET = ip_network(LAB_SUBNET, strict=False)
+except ValueError:
+    _LAB_NET = ip_network("10.66.0.0/24")
+
+
+def _from_lab(host: str | None) -> bool:
+    if not host:
+        return False
+    try:
+        return ip_address(host) in _LAB_NET
+    except ValueError:
+        # Non-IP peers (e.g. the TestClient) are not lab clients.
+        return False
+
+
+def _lab_allowed(method: str, path: str) -> bool:
+    # The only things a lab-side client may reach.
+    return path == "/health" or (method == "POST" and path == "/api/events")
 
 
 @asynccontextmanager
@@ -50,6 +77,15 @@ if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+@app.middleware("http")
+async def restrict_to_mgmt(request: Request, call_next):
+    """404 any lab-side request that is not token-gated ingest or the health check."""
+    host = request.client.host if request.client else None
+    if _from_lab(host) and not _lab_allowed(request.method, request.url.path):
+        return JSONResponse({"detail": "Not Found"}, status_code=status.HTTP_404_NOT_FOUND)
+    return await call_next(request)
+
+
 def require_ingest_token(x_mirage_token: str = Header(default="")) -> None:
     # The attacker shares the lab network with the controller, so only decoys
     # holding the shared token may submit events.
@@ -76,6 +112,10 @@ def dashboard() -> FileResponse:
 
 @app.websocket("/ws")
 async def dashboard_ws(ws: WebSocket) -> None:
+    # HTTP middleware does not see the WebSocket scope, so guard it here too.
+    if _from_lab(ws.client.host if ws.client else None):
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     manager: ConnectionManager = ws.app.state.manager
     await manager.connect(ws)
     try:
