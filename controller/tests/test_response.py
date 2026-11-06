@@ -237,3 +237,16 @@ def test_allowlisted_attacker_is_never_contained():
     assert res is None
     assert len(evictor.kicked_ips) == 0
     assert len(firewall.banned_ips) == 0
+
+
+def test_auto_containment_is_idempotent_under_repeated_events():
+    # Concurrent threshold-crossing events must not each run containment.
+    store = Store(":memory:")
+    enforcer = MockEnforcer()
+    eng = _engine(store, enforcer=enforcer)
+    store.upsert_attacker(_attacker(max_stage=4, risk_score=90))
+    eng.execute_containment("10.66.0.50", reason="risk score reached 90")
+    eng.execute_containment("10.66.0.50", reason="risk score reached 95")
+    responses = store.recent("responses", 10, "10.66.0.50")
+    assert len([r for r in responses if r["action"] == "containment_sequence"]) == 1
+    assert enforcer.calls.count(("block", "10.66.0.50")) == 1

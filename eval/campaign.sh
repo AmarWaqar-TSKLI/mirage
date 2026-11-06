@@ -20,7 +20,11 @@ step "1. port scan (nmap)"
 nmap -Pn -p 22,80,9000 "$ADMIN" "$SSH_HOST" "$S3" >/dev/null 2>&1 || true
 
 step "2. directory enumeration (gobuster) on the admin panel"
-gobuster dir -q -u "http://$ADMIN" -w /usr/share/wordlists/dirb/common.txt -t 20 2>/dev/null | head -20 || true
+# A focused slice of the wordlist: enough to look like real enumeration without
+# turning time-to-contain into minutes of brute forcing.
+head -300 /usr/share/dirb/wordlists/common.txt > /tmp/dirwl.txt
+printf 'backup\nadmin\nlogin\nrobots.txt\n.env\n' >> /tmp/dirwl.txt
+gobuster dir -q -u "http://$ADMIN" -w /tmp/dirwl.txt -t 20 2>/dev/null | head -20 || true
 
 step "3. read robots.txt (stage 1 honeytoken)"
 curl -s "http://$ADMIN/robots.txt" | head -5

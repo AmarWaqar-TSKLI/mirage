@@ -74,9 +74,28 @@ class ResponseEngine:
         return None
 
     def execute_containment(self, ip: str, reason: str = "automated threshold") -> Dict[str, Any]:
-        """Runs the four-stage containment and evidence collection sequence."""
-        log.warning("CONTAINING ATTACKER %s (reason: %s)", ip, reason)
+        """Runs the four-stage containment and evidence collection sequence.
+
+        Idempotent: the attacker's tools fire many events at once, so several can
+        cross the threshold before the first containment commits contained_at.
+        Only the first call does the work; the rest return the existing record.
+        """
         ts = datetime.now(timezone.utc).isoformat()
+        auto = reason.startswith("risk score")
+        # Atomically CLAIM containment under the lock before doing any work, so
+        # concurrent threshold-crossing events don't each run the sequence.
+        with self.store.lock:
+            existing = self.store.get_attacker(ip)
+            if existing and existing.get("contained_at") is not None and auto:
+                prior = self.store.recent("responses", 1, ip)
+                return prior[0] if prior else {"status": "already_contained", "src_ip": ip}
+            if existing:
+                existing["contained_at"] = ts
+                existing["playbook"] = Playbook.CONTAIN
+                self.store.upsert_attacker(existing)
+                self.store.commit()
+
+        log.warning("CONTAINING ATTACKER %s (reason: %s)", ip, reason)
         actions = {}
 
         # 1. Lockout & Session Eviction
@@ -109,11 +128,8 @@ class ResponseEngine:
 
         with self.store.lock:
             saved = self.store.insert_response(response_record)
+            # contained_at was already claimed atomically above; just read it back.
             attacker = self.store.get_attacker(ip)
-            if attacker:
-                attacker["contained_at"] = ts
-                attacker["playbook"] = Playbook.CONTAIN
-                self.store.upsert_attacker(attacker)
             self.store.commit()
 
         self._publish({"type": "response", "data": saved})

@@ -138,9 +138,7 @@ Plan and requirements: [plan.md](plan.md), [requirements.md](requirements.md).
 - `eval/metrics.py` computes, per run and aggregated (mean ± sd): time to detect, time to contain, false-positive rate, ATT&CK coverage, and trail stage reached, from the controller API.
 - `eval/run.sh N [active|observe]` resets the controller, runs N campaigns + benign traffic, and writes `eval/results/`. `observe` turns off automatic response (`MIRAGE_RESPONSE_MODE`); `active` measures time-to-contain.
 
-**Tested:** 83 automated tests pass (controller 25, admin-panel 7, ssh 32, s3 10, eval 9). The dashboard, live WebSocket, lab lockdown, decoy enforcement and the metrics were verified locally against a running controller.
-
-**Needs a live `docker compose` run to execute** (could not be run here, Docker was not available): the full `eval/run.sh` campaign across containers, and confirming the cross-container containment push drops a real attacker's next SSH/HTTP/S3 request. All pieces are unit-tested; the end-to-end lab run is the remaining check.
+**Tested:** 84 automated tests pass (controller 26, admin-panel 7, ssh 32, s3 10, eval 9), and the whole lab was run end to end in Docker on 2026-11-06. Full results in [eval-results.md](eval-results.md). Headline: detection ~2 ms, containment ~1.5 s, 100% ATT&CK coverage in observe mode, 0 false positives, and a contained attacker is really locked out (admin/S3 return 403, SSH re-login refused, stage reached drops from 6.0 to 3.2).
 
 ### Optional: LLM layer
 - Pass a `fallback` function to `Shell` in `decoys/ssh/app/server.py`. It is called only for commands the scripted shell does not know, and should return `None` on failure so the shell falls back to `command not found`.

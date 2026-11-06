@@ -29,6 +29,14 @@ MIRAGE_RESPONSE_MODE="$MODE" docker compose --profile eval up -d --build legit a
 # Wait for the controller API.
 for _ in $(seq 1 30); do curl -sf "$API/health" >/dev/null 2>&1 && break; sleep 1; done
 
+# Warmup: one discarded campaign so the decoys and tools are hot before we
+# measure. The first campaign after bring-up pays cold-start costs (containers
+# still settling, nmap/gobuster first run) that would otherwise skew run 1.
+echo ">> warmup campaign (not measured)"
+curl -s -X POST "$API/api/admin/reset" >/dev/null
+docker compose exec -T attacker /opt/campaign.sh >/dev/null 2>&1 || true
+curl -s -X POST "$API/api/admin/reset" >/dev/null
+
 for i in $(seq 1 "$N"); do
     echo ">> run $i/$N (mode=$MODE)"
     curl -s -X POST "$API/api/admin/reset" >/dev/null

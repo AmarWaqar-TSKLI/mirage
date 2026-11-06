@@ -197,7 +197,14 @@ def manual_uncontain(ip: str, request: Request) -> dict:
 
 @app.post("/api/admin/reset")
 def admin_reset(request: Request) -> dict:
-    """Wipe all records. Mgmt-only (the lab guard 404s this for attacker IPs).
-    Used by the evaluation harness to start each run from a clean slate."""
-    request.app.state.store.reset()
-    return {"status": "reset"}
+    """Wipe all records and clear decoy enforcement. Mgmt-only (the lab guard
+    404s this for attacker IPs). Used by the evaluation harness to start each
+    run from a clean slate: decoy block/tarpit state is in-memory on each decoy,
+    so it must be lifted here or a contained IP stays blocked into the next run."""
+    store = request.app.state.store
+    enforcer = request.app.state.response_engine.enforcer
+    cleared = [a["ip"] for a in store.attackers()]
+    for ip in cleared:
+        enforcer.clear(ip)
+    store.reset()
+    return {"status": "reset", "cleared": cleared}

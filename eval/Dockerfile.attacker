@@ -16,11 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         openssh-client \
         awscli \
         jq \
-        wordlists \
+        dirb \
     && rm -rf /var/lib/apt/lists/*
 
-# gobuster wordlist (dirb common.txt ships with the `wordlists` package, gzipped).
-RUN gunzip -kf /usr/share/wordlists/dirb/common.txt.gz 2>/dev/null || true
+# dirb ships the common.txt wordlist gobuster uses, at /usr/share/dirb/wordlists/.
 
 COPY eval/campaign.sh /opt/campaign.sh
 COPY eval/benign.sh /opt/benign.sh
