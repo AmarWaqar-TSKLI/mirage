@@ -1,6 +1,6 @@
 "use strict";
 
-/* Mirage deception grid — live console.
+/* Mirage deception grid — live cinematic console.
  * SECURITY: every value is attacker-controlled. Only ever placed with
  * textContent or DOM attributes, never innerHTML. Keep it that way.
  */
@@ -24,16 +24,16 @@ const ATTACK = {
 };
 
 const state = { attackers: new Map(), events: [], techniques: new Map(), counts: { events: 0, alerts: 0 } };
-const MAX_FEED = 200;
-const GAUGE_C = 314.16;
+const MAX_FEED = 200, GAUGE_C = 314.16;
 
 const $ = (id) => document.getElementById(id);
 function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = String(text); return n; }
 function fmtTime(ts) { const d = new Date(ts); if (isNaN(d)) return String(ts || ""); return d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0"); }
-
 function band(r) { return r >= 75 ? "hot" : r >= 40 ? "warn" : r > 0 ? "calm" : "idle"; }
 const BAND_VAR = { hot: "var(--hot)", warn: "var(--warn)", calm: "var(--calm)", idle: "var(--ink-faint)" };
 const BAND_WORD = { hot: "critical", warn: "elevated", calm: "watching", idle: "clear" };
+const RGB = { hot: [255, 61, 110], warn: [255, 176, 46], calm: [63, 224, 207], idle: [90, 102, 120] };
+let threatBand = "idle";
 
 function lead() {
   let b = null;
@@ -47,42 +47,33 @@ function lead() {
 function paintThreat() {
   const list = [...state.attackers.values()];
   const max = list.reduce((m, a) => Math.max(m, a.risk_score || 0), 0);
-  const b = band(max);
-  document.documentElement.style.setProperty("--threat", BAND_VAR[b]);
-  document.body.dataset.threat = b;
+  threatBand = band(max);
+  document.documentElement.style.setProperty("--threat", BAND_VAR[threatBand]);
+  document.body.dataset.threat = threatBand;
   $("meter-fill").style.width = max + "%";
-  $("meter-read").textContent = BAND_WORD[b];
+  $("meter-read").textContent = BAND_WORD[threatBand];
   $("stat-attackers").textContent = list.length;
   $("stat-contained").textContent = list.filter((a) => a.contained_at).length;
   $("map-hint").textContent = list.length ? `${list.length} in the trap` : "decoys armed";
 }
 
 // ------------------------------------------------------------ topology
-const DECOY = { admin: "n-admin", ssh: "n-ssh", s3: "n-s3" };
-function decoyForStage(s) { return s >= 5 ? "ssh,s3" : s >= 3 ? "admin,ssh" : s >= 1 ? "admin" : ""; }
 function renderMap() {
   const a = lead();
   const reached = a ? (a.max_stage || 0) : 0;
   const contained = a ? !!a.contained_at : false;
-
-  for (const k of Object.keys(DECOY)) { const n = $(DECOY[k]); n.classList.remove("reached", "current", "trapped"); }
-  const setReached = (id) => $(id).classList.add("reached");
-  if (reached >= 1) setReached("n-admin");
-  if (reached >= 3) setReached("n-ssh");
-  if (reached >= 5) setReached("n-s3");
-
-  // current / trapped node = the decoy owning the top stage
+  for (const id of ["n-admin", "n-ssh", "n-s3"]) $(id).classList.remove("reached", "current", "trapped");
+  if (reached >= 1) $("n-admin").classList.add("reached");
+  if (reached >= 3) $("n-ssh").classList.add("reached");
+  if (reached >= 5) $("n-s3").classList.add("reached");
   const cur = reached >= 5 ? "n-s3" : reached >= 3 ? "n-ssh" : reached >= 1 ? "n-admin" : null;
   if (cur) { $(cur).classList.remove("reached"); $(cur).classList.add(contained ? "trapped" : "current"); }
-
   const link = (id, lit) => { const e = $(id); e.classList.toggle("lit", lit && !contained); e.classList.toggle("severed", false); };
   link("lk-a", reached >= 1); link("lk-1", reached >= 3); link("lk-2", reached >= 5);
   if (contained) {
-    // sever the link into the trapped node
     const sev = cur === "n-s3" ? "lk-2" : cur === "n-ssh" ? "lk-1" : "lk-a";
     $(sev).classList.remove("lit"); $(sev).classList.add("severed");
   }
-  $("n-atk").classList.toggle("muted", !a);
 }
 
 // ------------------------------------------------------------ dossier
@@ -91,7 +82,6 @@ function renderDossier() {
   const empty = $("dossier-empty"), live = $("dossier-live");
   if (!a) { empty.hidden = false; live.hidden = true; $("dossier-hint").textContent = "—"; return; }
   empty.hidden = true; live.hidden = false;
-
   const risk = a.risk_score || 0, contained = !!a.contained_at, b = band(risk);
   $("dossier-hint").textContent = BAND_WORD[b];
   $("d-risk").textContent = risk;
@@ -106,7 +96,6 @@ function renderDossier() {
   $("d-contain").onclick = () => control("contain", a.ip);
   $("d-release").onclick = () => control("uncontain", a.ip);
 }
-
 function refresh() { paintThreat(); renderMap(); renderDossier(); }
 
 // --------------------------------------------------------------- feed
@@ -128,6 +117,7 @@ function renderFeed() {
 }
 function pushEvent(e) {
   state.counts.events += 1;
+  pulse += 1.1;                        // drives the intrusion-pulse wave
   state.events.unshift(e);
   state.events.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
   if (state.events.length > MAX_FEED * 2) state.events.length = MAX_FEED;
@@ -146,8 +136,6 @@ function pushTheft(e) {
   host.prepend(row);
   while (host.childElementCount > 40) host.lastElementChild.remove();
 }
-
-// -------------------------------------------------------------- alerts
 function pushAlert(a) {
   state.counts.alerts += 1;
   $("stat-alerts").textContent = state.counts.alerts;
@@ -156,12 +144,9 @@ function pushAlert(a) {
   row.append(el("span", "sev", (a.severity || "low").slice(0, 4).toUpperCase()));
   const body = el("div");
   body.append(el("div", "alert-title", a.title), el("div", "alert-sub", `${a.src_ip} · ${fmtTime(a.ts)}`));
-  row.append(body);
-  host.prepend(row);
+  row.append(body); host.prepend(row);
   while (host.childElementCount > 60) host.lastElementChild.remove();
 }
-
-// ------------------------------------------------------------ responses
 function pushResponse(r) {
   const host = $("resp-list");
   const resp = el("div", "resp " + (r.playbook || "watch"));
@@ -181,8 +166,6 @@ function pushResponse(r) {
   host.prepend(resp);
   while (host.childElementCount > 50) host.lastElementChild.remove();
 }
-
-// ----------------------------------------------------------- techniques
 function renderTechniques() {
   const host = $("tech-list"); host.replaceChildren();
   const items = [...state.techniques.entries()].sort((a, b) => b[1] - a[1]);
@@ -193,8 +176,85 @@ function renderTechniques() {
     host.append(t);
   }
 }
-
 function upsertAttacker(a) { state.attackers.set(a.ip, a); refresh(); }
+
+// ============================================================ animation
+// 1) ambient particle field  2) light flowing the attack path  3) pulse wave
+let pulse = 0;
+const hist = new Array(170).fill(0);
+
+function threatRGB() { return RGB[threatBand] || RGB.idle; }
+
+// ---- background constellation
+const bg = $("bg"), bgx = bg.getContext("2d");
+let parts = [];
+function sizeBg() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  bg.width = innerWidth * dpr; bg.height = innerHeight * dpr; bgx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (!parts.length) parts = Array.from({ length: 64 }, () => ({
+    x: Math.random() * innerWidth, y: Math.random() * innerHeight,
+    vx: (Math.random() - .5) * .18, vy: (Math.random() - .5) * .18,
+  }));
+}
+function drawBg() {
+  bgx.clearRect(0, 0, innerWidth, innerHeight);
+  const [r, g, b] = threatRGB();
+  for (const p of parts) {
+    p.x += p.vx; p.y += p.vy;
+    if (p.x < 0 || p.x > innerWidth) p.vx *= -1;
+    if (p.y < 0 || p.y > innerHeight) p.vy *= -1;
+  }
+  for (let i = 0; i < parts.length; i++) {
+    for (let j = i + 1; j < parts.length; j++) {
+      const a = parts[i], c = parts[j], dx = a.x - c.x, dy = a.y - c.y, d = Math.hypot(dx, dy);
+      if (d < 140) { bgx.strokeStyle = `rgba(${r},${g},${b},${0.05 * (1 - d / 140)})`; bgx.lineWidth = 1; bgx.beginPath(); bgx.moveTo(a.x, a.y); bgx.lineTo(c.x, c.y); bgx.stroke(); }
+    }
+  }
+  bgx.fillStyle = `rgba(${r},${g},${b},0.5)`;
+  for (const p of parts) { bgx.beginPath(); bgx.arc(p.x, p.y, 1.1, 0, 7); bgx.fill(); }
+}
+
+// ---- traveling sparks along lit trail links
+const SPARK = [["lk-a", "sp-a"], ["lk-1", "sp-1"], ["lk-2", "sp-2"]];
+let st = 0;
+function drawSparks() {
+  st = (st + 0.006) % 1;
+  for (const [lk, sp] of SPARK) {
+    const path = $(lk), spark = $(sp);
+    if (path.classList.contains("lit")) {
+      const L = path.getTotalLength(), pt = path.getPointAtLength(st * L);
+      spark.setAttribute("cx", pt.x); spark.setAttribute("cy", pt.y); spark.classList.add("on");
+    } else spark.classList.remove("on");
+  }
+}
+
+// ---- intrusion-pulse waveform
+const wave = $("wave"), wx = wave.getContext("2d");
+function sizeWave() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  wave.width = wave.clientWidth * dpr; wave.height = wave.clientHeight * dpr; wx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function drawWave() {
+  pulse *= 0.93;
+  hist.push(Math.min(pulse, 6)); hist.shift();
+  $("pulse-rate").textContent = pulse.toFixed(1) + " ev/s";
+  const W = wave.clientWidth, H = wave.clientHeight, [r, g, b] = threatRGB();
+  wx.clearRect(0, 0, W, H);
+  const step = W / (hist.length - 1), base = H - 2;
+  wx.beginPath(); wx.moveTo(0, base);
+  for (let i = 0; i < hist.length; i++) wx.lineTo(i * step, base - (hist[i] / 6) * (H - 6));
+  wx.lineTo(W, base); wx.closePath();
+  const grad = wx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, `rgba(${r},${g},${b},0.35)`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  wx.fillStyle = grad; wx.fill();
+  wx.beginPath();
+  for (let i = 0; i < hist.length; i++) { const x = i * step, y = base - (hist[i] / 6) * (H - 6); i ? wx.lineTo(x, y) : wx.moveTo(x, y); }
+  wx.strokeStyle = `rgb(${r},${g},${b})`; wx.lineWidth = 1.8; wx.shadowColor = `rgb(${r},${g},${b})`; wx.shadowBlur = 8; wx.stroke(); wx.shadowBlur = 0;
+}
+
+function tick() { drawBg(); drawSparks(); drawWave(); requestAnimationFrame(tick); }
+function onResize() { sizeBg(); sizeWave(); }
+addEventListener("resize", onResize);
 
 // ------------------------------------------------------------- io
 async function control(kind, ip) {
@@ -233,4 +293,6 @@ function connect() {
   };
 }
 
+onResize();
+requestAnimationFrame(tick);
 loadInitial().catch((e) => console.warn("initial load failed", e)).finally(connect);
