@@ -6,7 +6,7 @@ Mirage is an Information Security project that turns a network into a trap. Inst
 
 The project is based on the [MITRE Engage](https://engage.mitre.org) framework for adversary engagement, and every observed action is mapped to [MITRE ATT&CK](https://attack.mitre.org) techniques.
 
-> **Status:** All 8 steps built and run end to end in the lab. Controller, decoys (admin panel, SSH server, S3 endpoint), dynamic risk scoring, response playbooks, active containment, the live dashboard and the evaluation harness are all in place, with 84 automated tests passing. Measured in the Docker lab: detection ~2 ms, containment ~1.5 s, 100% ATT&CK coverage, 0 false positives. See [docs/eval-results.md](docs/eval-results.md) for the full numbers, [docs/PROGRESS.md](docs/PROGRESS.md) for detail, and [docs/plan.md](docs/plan.md) for the steps 7–8 design.
+> **Status:** All 8 steps built and run end to end in the lab. Controller, decoys (admin panel, SSH server, S3 endpoint), dynamic risk scoring, response playbooks, active containment, the live dashboard and the evaluation harness are all in place, with 85 automated tests passing. Measured in the Docker lab: detection under 50 ms, containment ~1.3 s, 100% ATT&CK coverage, 0 false positives. See [docs/eval-results.md](docs/eval-results.md) for the full numbers, [docs/PROGRESS.md](docs/PROGRESS.md) for detail, and [docs/plan.md](docs/plan.md) for the steps 7–8 design.
 
 ---
 
