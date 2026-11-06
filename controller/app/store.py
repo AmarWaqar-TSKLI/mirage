@@ -69,58 +69,74 @@ def _row(row: sqlite3.Row) -> dict:
 
 
 class Store:
+    """SQLite store shared by every request thread.
+
+    One connection is shared across threads, and sqlite3 connections are not
+    safe for concurrent use, so EVERY access (reads included) goes through
+    `self.lock`. It is reentrant so callers can hold it across several calls to
+    make one atomic unit (Engine.process, ResponseEngine.execute_containment).
+    Unlocked reads used to race the writers: a read inside Engine.process came
+    back empty, the attacker looked brand new, and its row was overwritten.
+    """
+
     def __init__(self, path: str | Path):
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.executescript(SCHEMA)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        with self.lock:
+            self.db.execute("PRAGMA journal_mode=WAL")
+            self.db.executescript(SCHEMA)
 
     def insert_event(self, e: dict) -> None:
-        self.db.execute(
-            "INSERT INTO events VALUES (:id, :ts, :source, :event_type, :src_ip, :src_port, :session_id,"
-            " :asset, :honeytoken_id, :stage, :techniques, :engage, :details)",
-            {**e, "techniques": json.dumps(e["techniques"]), "engage": json.dumps(e["engage"]),
-             "details": json.dumps(e["details"])},
-        )
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO events VALUES (:id, :ts, :source, :event_type, :src_ip, :src_port, :session_id,"
+                " :asset, :honeytoken_id, :stage, :techniques, :engage, :details)",
+                {**e, "techniques": json.dumps(e["techniques"]), "engage": json.dumps(e["engage"]),
+                 "details": json.dumps(e["details"])},
+            )
 
     def insert_alert(self, a: dict) -> dict:
-        cur = self.db.execute(
-            "INSERT INTO alerts (ts, event_id, src_ip, severity, title, honeytoken_id, stage, techniques, engage)"
-            " VALUES (:ts, :event_id, :src_ip, :severity, :title, :honeytoken_id, :stage, :techniques, :engage)",
-            {**a, "techniques": json.dumps(a["techniques"]), "engage": json.dumps(a["engage"])},
-        )
-        return {**a, "id": cur.lastrowid}
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO alerts (ts, event_id, src_ip, severity, title, honeytoken_id, stage, techniques, engage)"
+                " VALUES (:ts, :event_id, :src_ip, :severity, :title, :honeytoken_id, :stage, :techniques, :engage)",
+                {**a, "techniques": json.dumps(a["techniques"]), "engage": json.dumps(a["engage"])},
+            )
+            return {**a, "id": cur.lastrowid}
 
     def insert_response(self, r: dict) -> dict:
-        cur = self.db.execute(
-            "INSERT INTO responses (ts, src_ip, playbook, action, status, details)"
-            " VALUES (:ts, :src_ip, :playbook, :action, :status, :details)",
-            {**r, "details": json.dumps(r.get("details", {}))},
-        )
-        return {**r, "id": cur.lastrowid}
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO responses (ts, src_ip, playbook, action, status, details)"
+                " VALUES (:ts, :src_ip, :playbook, :action, :status, :details)",
+                {**r, "details": json.dumps(r.get("details", {}))},
+            )
+            return {**r, "id": cur.lastrowid}
 
     def get_attacker(self, ip: str) -> dict | None:
-        row = self.db.execute("SELECT * FROM attackers WHERE ip = ?", (ip,)).fetchone()
-        return _row(row) if row else None
+        with self.lock:
+            row = self.db.execute("SELECT * FROM attackers WHERE ip = ?", (ip,)).fetchone()
+            return _row(row) if row else None
 
     def upsert_attacker(self, a: dict) -> None:
-        self.db.execute(
-            "INSERT INTO attackers VALUES (:ip, :first_seen, :last_seen, :event_count, :max_stage, :risk_score, :playbook, :contained_at, :techniques, :tokens)"
-            " ON CONFLICT (ip) DO UPDATE SET last_seen = excluded.last_seen, event_count = excluded.event_count,"
-            " max_stage = excluded.max_stage, risk_score = excluded.risk_score, playbook = excluded.playbook,"
-            " contained_at = coalesce(excluded.contained_at, attackers.contained_at), techniques = excluded.techniques, tokens = excluded.tokens",
-            {
-                "risk_score": 0,
-                "playbook": "watch",
-                "contained_at": None,
-                **a,
-                "techniques": json.dumps(a["techniques"]),
-                "tokens": json.dumps(a["tokens"]),
-            },
-        )
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO attackers VALUES (:ip, :first_seen, :last_seen, :event_count, :max_stage, :risk_score, :playbook, :contained_at, :techniques, :tokens)"
+                " ON CONFLICT (ip) DO UPDATE SET last_seen = excluded.last_seen, event_count = excluded.event_count,"
+                " max_stage = excluded.max_stage, risk_score = excluded.risk_score, playbook = excluded.playbook,"
+                " contained_at = coalesce(excluded.contained_at, attackers.contained_at), techniques = excluded.techniques, tokens = excluded.tokens",
+                {
+                    "risk_score": 0,
+                    "playbook": "watch",
+                    "contained_at": None,
+                    **a,
+                    "techniques": json.dumps(a["techniques"]),
+                    "tokens": json.dumps(a["tokens"]),
+                },
+            )
 
     def reset(self) -> None:
         """Wipe all records. Used by the evaluation harness between runs."""
@@ -131,17 +147,21 @@ class Store:
     def clear_containment(self, ip: str) -> None:
         # upsert_attacker coalesces contained_at (so ingest never wipes it), so a
         # deliberate operator release needs to force it back to NULL here.
-        self.db.execute("UPDATE attackers SET contained_at = NULL, playbook = 'watch' WHERE ip = ?", (ip,))
+        with self.lock:
+            self.db.execute("UPDATE attackers SET contained_at = NULL, playbook = 'watch' WHERE ip = ?", (ip,))
 
     def commit(self) -> None:
-        self.db.commit()
+        with self.lock:
+            self.db.commit()
 
     def recent(self, table: str, limit: int, ip: str | None = None) -> list[dict]:
         assert table in {"events", "alerts", "responses"}
         where, args = ("WHERE src_ip = ?", [ip]) if ip else ("", [])
-        rows = self.db.execute(f"SELECT * FROM {table} {where} ORDER BY ts DESC LIMIT ?", [*args, limit])
+        with self.lock:
+            rows = self.db.execute(f"SELECT * FROM {table} {where} ORDER BY ts DESC LIMIT ?", [*args, limit]).fetchall()
         return [_row(r) for r in rows]
 
     def attackers(self) -> list[dict]:
-        rows = self.db.execute("SELECT * FROM attackers ORDER BY last_seen DESC")
+        with self.lock:
+            rows = self.db.execute("SELECT * FROM attackers ORDER BY last_seen DESC").fetchall()
         return [_row(r) for r in rows]
