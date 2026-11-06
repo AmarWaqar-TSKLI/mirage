@@ -23,6 +23,7 @@ class ResponseEngine:
         evictor: Optional[SessionEvictor] = None,
         firewall: Optional[FirewallManager] = None,
         snapshots: Optional[SnapshotManager] = None,
+        publisher: Optional[Any] = None,
     ):
         self.store = store
         self.allowlist = allowlist or Allowlist()
@@ -30,6 +31,12 @@ class ResponseEngine:
         self.evictor = evictor or SessionEvictor()
         self.firewall = firewall or FirewallManager()
         self.snapshots = snapshots or SnapshotManager()
+        # Optional live fan-out to the dashboard (broadcast.Publisher). None in tests.
+        self.publisher = publisher
+
+    def _publish(self, message: dict) -> None:
+        if self.publisher is not None:
+            self.publisher.publish(message)
 
     def handle(self, attacker: Dict[str, Any], event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Evaluates attacker risk and dispatches the appropriate response playbook."""
@@ -91,6 +98,9 @@ class ResponseEngine:
                 self.store.upsert_attacker(attacker)
             self.store.commit()
 
+        self._publish({"type": "response", "data": saved})
+        if attacker:
+            self._publish({"type": "attacker", "data": attacker})
         log.warning("containment sequence completed for %s", ip)
         return saved
 
@@ -112,5 +122,31 @@ class ResponseEngine:
                 attacker["playbook"] = Playbook.TARPIT
                 self.store.upsert_attacker(attacker)
             self.store.commit()
+        self._publish({"type": "response", "data": saved})
+        if attacker:
+            self._publish({"type": "attacker", "data": attacker})
         log.info("tarpit throttling enabled for %s (%0.1fs delay)", ip, delay)
+        return saved
+
+    def uncontain(self, ip: str) -> Dict[str, Any]:
+        """Operator release: lift the firewall ban and clear the attacker's contained state."""
+        fw = self.firewall.unban(ip)
+        ts = datetime.now(timezone.utc).isoformat()
+        response_record = {
+            "ts": ts,
+            "src_ip": ip,
+            "playbook": Playbook.WATCH,
+            "action": "release",
+            "status": "completed",
+            "details": {"firewall": fw},
+        }
+        with self.store.lock:
+            saved = self.store.insert_response(response_record)
+            self.store.clear_containment(ip)
+            attacker = self.store.get_attacker(ip)
+            self.store.commit()
+        self._publish({"type": "response", "data": saved})
+        if attacker:
+            self._publish({"type": "attacker", "data": attacker})
+        log.warning("released %s", ip)
         return saved

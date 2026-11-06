@@ -1,14 +1,19 @@
-"""Mirage controller: receives every decoy event, labels it, tracks attackers, raises alerts, and executes active containment."""
+"""Mirage controller: receives every decoy event, labels it, tracks attackers, raises alerts, executes active containment, and serves the live dashboard."""
 
+import asyncio
 import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from mirage_common import Event, Registry
 
+from .broadcast import ConnectionManager, Publisher
 from .engine import Engine
 from .response_engine import ResponseEngine
 from .store import Store
@@ -16,12 +21,22 @@ from .store import Store
 log = logging.getLogger("mirage.controller")
 logging.basicConfig(level=logging.INFO)
 
+STATIC_DIR = Path(__file__).parent / "static"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Captured so synchronous ingest handlers (run in a worker thread) can push
+    # to async WebSocket clients via Publisher.
+    manager = ConnectionManager()
+    publisher = Publisher(manager, asyncio.get_running_loop())
+
     store = Store(os.environ.get("MIRAGE_DB_PATH", "/data/mirage.db"))
     registry = Registry.load(os.environ.get("MIRAGE_HONEYTOKENS", "/etc/mirage/honeytokens.json"))
-    response_engine = ResponseEngine(store)
+    response_engine = ResponseEngine(store, publisher=publisher)
+
+    app.state.manager = manager
+    app.state.publisher = publisher
     app.state.store = store
     app.state.response_engine = response_engine
     app.state.engine = Engine(store, registry, response_engine=response_engine)
@@ -29,7 +44,10 @@ async def lifespan(app: FastAPI):
     store.db.close()
 
 
-app = FastAPI(title="Mirage Controller", lifespan=lifespan)
+app = FastAPI(title="Mirage Controller", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+if STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def require_ingest_token(x_mirage_token: str = Header(default="")) -> None:
@@ -40,9 +58,37 @@ def require_ingest_token(x_mirage_token: str = Header(default="")) -> None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid ingest token")
 
 
-@app.get("/health")
+@app.get("/health", include_in_schema=False)
 def health() -> dict:
     return {"status": "ok"}
+
+
+# ----------------------------------------------------------------- dashboard
+
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> FileResponse:
+    index = STATIC_DIR / "index.html"
+    if not index.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "dashboard not built")
+    return FileResponse(index)
+
+
+@app.websocket("/ws")
+async def dashboard_ws(ws: WebSocket) -> None:
+    manager: ConnectionManager = ws.app.state.manager
+    await manager.connect(ws)
+    try:
+        # The dashboard is read-only; we only need the socket open to push to it.
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await manager.disconnect(ws)
+
+
+# --------------------------------------------------------------------- ingest
 
 
 @app.post("/api/events", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_ingest_token)])
@@ -52,7 +98,20 @@ def ingest_event(event: Event, request: Request) -> dict:
              row["asset"], row["stage"])
     if alert:
         log.warning("ALERT [%s] %s from %s", alert["severity"], alert["title"], alert["src_ip"])
+
+    # Push the live deltas to every connected dashboard. Never fail ingest on this.
+    publisher: Publisher = request.app.state.publisher
+    publisher.publish({"type": "event", "data": row})
+    if alert:
+        publisher.publish({"type": "alert", "data": alert})
+    attacker = request.app.state.store.get_attacker(row["src_ip"])
+    if attacker:
+        publisher.publish({"type": "attacker", "data": attacker})
+
     return {"event_id": row["id"], "alert_id": alert["id"] if alert else None}
+
+
+# ----------------------------------------------------------------------- reads
 
 
 @app.get("/api/events")
@@ -83,6 +142,9 @@ def get_attacker(ip: str, request: Request) -> dict:
     return attacker
 
 
+# ------------------------------------------------------------- manual controls
+
+
 @app.post("/api/contain/{ip}")
 def manual_contain(ip: str, request: Request) -> dict:
     return request.app.state.response_engine.execute_containment(ip, reason="manual_operator_trigger")
@@ -90,4 +152,4 @@ def manual_contain(ip: str, request: Request) -> dict:
 
 @app.post("/api/uncontain/{ip}")
 def manual_uncontain(ip: str, request: Request) -> dict:
-    return request.app.state.response_engine.firewall.unban(ip)
+    return request.app.state.response_engine.uncontain(ip)

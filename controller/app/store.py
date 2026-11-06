@@ -122,6 +122,11 @@ class Store:
             },
         )
 
+    def clear_containment(self, ip: str) -> None:
+        # upsert_attacker coalesces contained_at (so ingest never wipes it), so a
+        # deliberate operator release needs to force it back to NULL here.
+        self.db.execute("UPDATE attackers SET contained_at = NULL, playbook = 'watch' WHERE ip = ?", (ip,))
+
     def commit(self) -> None:
         self.db.commit()
 

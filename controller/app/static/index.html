@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mirage · Command & Telemetry</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128065;</text></svg>" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <h1>MIRAGE</h1>
+        <p>Adaptive Deception &amp; Active Response</p>
+      </div>
+    </div>
+    <div class="status">
+      <div class="stat"><span class="stat-num" id="stat-attackers">0</span><span class="stat-label">attackers</span></div>
+      <div class="stat"><span class="stat-num" id="stat-alerts">0</span><span class="stat-label">alerts</span></div>
+      <div class="stat"><span class="stat-num" id="stat-events">0</span><span class="stat-label">events</span></div>
+      <div class="stat"><span class="stat-num danger" id="stat-contained">0</span><span class="stat-label">contained</span></div>
+      <div class="conn" id="conn"><span class="dot"></span><span id="conn-text">connecting</span></div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="col col-attackers">
+      <div class="panel">
+        <div class="panel-head"><h2>Attackers</h2><span class="muted" id="attackers-empty">no activity yet</span></div>
+        <div id="attackers" class="attacker-list"></div>
+      </div>
+    </section>
+
+    <section class="col col-feed">
+      <div class="panel feed-panel">
+        <div class="panel-head"><h2>Live event feed</h2><span class="muted">newest first · sorted by timestamp</span></div>
+        <div id="feed" class="feed"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Credential theft</h2></div>
+        <div id="theft" class="theft"></div>
+      </div>
+    </section>
+
+    <section class="col col-side">
+      <div class="panel">
+        <div class="panel-head"><h2>Alerts</h2></div>
+        <div id="alerts" class="alerts"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Active response log</h2></div>
+        <div id="responses" class="responses"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>ATT&amp;CK techniques seen</h2></div>
+        <div id="techniques" class="techniques"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
