@@ -122,6 +122,12 @@ class Store:
             },
         )
 
+    def reset(self) -> None:
+        """Wipe all records. Used by the evaluation harness between runs."""
+        with self.lock:
+            self.db.executescript("DELETE FROM events; DELETE FROM alerts; DELETE FROM responses; DELETE FROM attackers;")
+            self.db.commit()
+
     def clear_containment(self, ip: str) -> None:
         # upsert_attacker coalesces contained_at (so ingest never wipes it), so a
         # deliberate operator release needs to force it back to NULL here.

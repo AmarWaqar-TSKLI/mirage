@@ -23,6 +23,8 @@ services:
       # Decoy control servers the containment engine pushes block/tarpit/clear to.
       MIRAGE_SSH_CONTROL_URL: http://10.66.0.21:8022
       MIRAGE_DECOY_CONTROL_URLS: http://10.66.0.20:8020,http://10.66.0.21:8022,http://10.66.0.22:8090
+      # active (default) = respond on risk; observe = watch only (eval observe mode).
+      MIRAGE_RESPONSE_MODE: ${MIRAGE_RESPONSE_MODE:-active}
     volumes:
       - controller-data:/data
       - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
@@ -82,7 +84,36 @@ services:
     depends_on: [controller]
     restart: unless-stopped
 
-  # The attacker container is added in later steps.
+  # ----- Evaluation (step 8), started only with: docker compose --profile eval up
+  legit:
+    image: nginx:alpine
+    profiles: ["eval"]
+    volumes:
+      - ./eval/legit-site:/usr/share/nginx/html:ro
+    networks:
+      lab:
+        ipv4_address: 10.66.0.30
+    restart: unless-stopped
+
+  attacker:
+    build:
+      context: .
+      dockerfile: eval/Dockerfile.attacker
+    profiles: ["eval"]
+    networks:
+      lab:
+        ipv4_address: 10.66.0.50
+    depends_on: [admin-panel, ssh, s3]
+
+  benign:
+    build:
+      context: .
+      dockerfile: eval/Dockerfile.attacker
+    profiles: ["eval"]
+    networks:
+      lab:
+        ipv4_address: 10.66.0.51
+    depends_on: [legit]
 
 networks:
   lab:

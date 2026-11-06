@@ -12,9 +12,9 @@ Steps 1–6 are done and tested. Steps 7–8 and the optional LLM layer are stil
 | 3 | Admin panel decoy and honeytokens (robots.txt → .env leak) | ✅ Done |
 | 4 | SSH decoy: scripted shell, session recording | ✅ Done |
 | 5 | Fake S3 endpoint and `passwords.xlsx` bait | ✅ Done |
-| 6 | Risk score, response playbooks, nftables containment | ✅ Done |
-| 7 | Live dashboard | ⬜ To do |
-| 8 | Evaluation: attacker container, attack script, benign traffic, metrics | ⬜ To do |
+| 6 | Risk score, response playbooks, nftables containment | ✅ Done (containment reach fixed in step 7) |
+| 7 | Live dashboard | ✅ Done |
+| 8 | Evaluation: attacker container, attack script, benign traffic, metrics | ✅ Done (needs a live `docker compose` run to execute) |
 | + | LLM layer for the SSH shell (optional) | ⬜ Deferred |
 
 ---
@@ -119,22 +119,28 @@ Steps 1–6 are done and tested. Steps 7–8 and the optional LLM layer are stil
 
 ---
 
-## What is left
+## Steps 7-8 (done)
 
-### Step 7: Dashboard
-- A single page served by the controller that updates live over WebSockets. Add a broadcast in `ingest_event` after `engine.process`.
-- It should show the live event feed, each attacker's progress along the 6 trail stages, credential theft events, observed ATT&CK techniques and the response log.
-- The REST endpoints above already return everything needed for the first page load.
+Plan and requirements: [plan.md](plan.md), [requirements.md](requirements.md).
 
-### Step 8: Evaluation
-- An attacker container (Kali, or Alpine with nmap, gobuster, hydra, curl, sshpass and awscli) at 10.66.0.50. The lab is internal, so the tools must be built into the image.
-- A scripted campaign that walks the whole trail (the manual run above is a starting point).
-- A benign traffic generator that acts like normal users. Normal users should never touch a decoy, which shows the false-positive rate is close to zero.
-- Metrics computed from the controller database:
-  - mean time to detect (first event → first alert)
-  - mean time to contain (first event → containment)
-  - false-positive rate
-  - ATT&CK technique coverage
+### Step 7: Dashboard (`controller/app/static/`, `broadcast.py`)
+- Single page served at `/` by the controller: first paint from the REST reads, live updates over `/ws`. `ingest_event` and the response engine push `event`/`alert`/`attacker`/`response` deltas through a thread-safe `Publisher` (captured loop + `run_coroutine_threadsafe`), so the sync ingest path never blocks on the async fan-out.
+- Shows the live event feed (sorted by timestamp), each attacker's 6-stage trail with risk and playbook, credential theft, alerts, the response log and the ATT&CK techniques seen (by name). Manual Contain / Release buttons.
+- Every attacker-controlled field is rendered with `textContent`, never `innerHTML`.
+- **Lab lockdown:** the attacker shares the lab subnet, so an HTTP middleware and a `/ws` guard 404 (or close) any lab-side request that is not token-gated `POST /api/events` or `/health`. The dashboard, reads and controls answer only on the mgmt side. Subnet is `MIRAGE_LAB_SUBNET` (default `10.66.0.0/24`).
+
+### Step 6 fix: containment that reaches the decoys (`mirage_common/enforce.py`, `control.py`, `controller/app/decoy_control.py`)
+- The old firewall ban only dropped traffic to the controller, not to the decoys the attacker uses. Now each decoy runs a token-gated control server (`/enforce` block|tarpit|clear) and keeps an `EnforcementState`. On containment the controller pushes a **block** to every decoy: the SSH decoy refuses the IP at auth (closing the login-time gap and the auth→session race) and kicks live sessions; the admin-panel and S3 decoys return 403. Tarpit is now a real per-request/per-command delay, not a no-op. Release clears it everywhere.
+
+### Step 8: Evaluation (`eval/`)
+- `eval/Dockerfile.attacker`: `debian:bookworm-slim` with nmap, gobuster, hydra, curl, sshpass, awscli baked in (lab is internal). Under the `eval` compose profile: `attacker` (10.66.0.50), `benign` (10.66.0.51), and a real non-decoy `legit` nginx site (10.66.0.30).
+- `eval/campaign.sh` walks the whole trail with real tools, incl. `aws s3 ls/cp` against the S3 decoy. `eval/benign.sh` is normal-user traffic against the legit site only, so it never touches a decoy (false-positive rate stays ~0).
+- `eval/metrics.py` computes, per run and aggregated (mean ± sd): time to detect, time to contain, false-positive rate, ATT&CK coverage, and trail stage reached, from the controller API.
+- `eval/run.sh N [active|observe]` resets the controller, runs N campaigns + benign traffic, and writes `eval/results/`. `observe` turns off automatic response (`MIRAGE_RESPONSE_MODE`); `active` measures time-to-contain.
+
+**Tested:** 83 automated tests pass (controller 25, admin-panel 7, ssh 32, s3 10, eval 9). The dashboard, live WebSocket, lab lockdown, decoy enforcement and the metrics were verified locally against a running controller.
+
+**Needs a live `docker compose` run to execute** (could not be run here, Docker was not available): the full `eval/run.sh` campaign across containers, and confirming the cross-container containment push drops a real attacker's next SSH/HTTP/S3 request. All pieces are unit-tested; the end-to-end lab run is the remaining check.
 
 ### Optional: LLM layer
 - Pass a `fallback` function to `Shell` in `decoys/ssh/app/server.py`. It is called only for commands the scripted shell does not know, and should return `None` on failure so the shell falls back to `command not found`.
@@ -159,6 +165,17 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"   # paste into MIR
 pip install ./common && python3 tools/gen_honeytokens.py         # writes config/honeytokens.local.json
 docker compose up -d --build
 curl localhost:8000/api/alerts
+```
+
+Then open the **dashboard** at http://127.0.0.1:8000/ on the host (host-only; the attacker on the lab network gets 404s for everything but event ingest).
+
+Run the **evaluation** (needs the lab up):
+
+```bash
+docker compose build                # builds the attacker/benign image too
+eval/run.sh 10 active               # 10 campaigns, containment on -> time-to-contain
+eval/run.sh 10 observe              # containment off -> full-trail detection + coverage
+# results and a mean+/-sd summary land in eval/results/
 ```
 
 The lab network has no internet, so a quick attacker shell has to install its tools first and then join the lab:
@@ -190,7 +207,10 @@ config/honeytokens.json registry template of planted items (IDs, stages, locatio
 controller/             FastAPI controller: ingest, storage, labelling, alerts
 decoys/admin-panel/     fake admin web panel (stages 1-2)
 decoys/ssh/             fake SSH deploy server with scripted shell (stages 3-4)
-docs/                   event format and this progress file
+decoys/s3/              fake S3 endpoint and bait spreadsheet (stages 5-6)
+controller/app/static/  the live dashboard (served at /)
+eval/                   evaluation: attacker image, campaign, benign traffic, metrics
+docs/                   event format, this progress file, plan.md, requirements.md
 tools/                  honeytoken generator
-docker-compose.yml      the lab
+docker-compose.yml      the lab (+ the `eval` profile)
 ```

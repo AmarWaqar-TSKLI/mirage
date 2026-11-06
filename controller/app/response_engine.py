@@ -1,6 +1,7 @@
 """Orchestrates active response playbooks, containment execution, and forensic capture."""
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +37,10 @@ class ResponseEngine:
         # Pushes block/tarpit/clear to the decoys. Default reads decoy control
         # URLs from env (empty in tests, so no network calls there).
         self.enforcer = enforcer or DecoyControl()
+        # "observe" turns off automatic response (for the evaluation's observe
+        # mode, which measures full-trail detection and coverage). Manual
+        # contain/uncontain still work. "active" (default) responds on risk.
+        self.mode = os.environ.get("MIRAGE_RESPONSE_MODE", "active").lower()
         # Optional live fan-out to the dashboard (broadcast.Publisher). None in tests.
         self.publisher = publisher
 
@@ -46,6 +51,10 @@ class ResponseEngine:
     def handle(self, attacker: Dict[str, Any], event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Evaluates attacker risk and dispatches the appropriate response playbook."""
         ip = attacker["ip"]
+
+        # Observe mode: watch only, take no automatic action.
+        if self.mode == "observe":
+            return None
 
         # Defender protection: allowlisted IPs are never acted against
         if self.allowlist.is_allowed(ip):

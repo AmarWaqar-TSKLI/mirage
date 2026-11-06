@@ -193,3 +193,11 @@ def manual_contain(ip: str, request: Request) -> dict:
 @app.post("/api/uncontain/{ip}")
 def manual_uncontain(ip: str, request: Request) -> dict:
     return request.app.state.response_engine.uncontain(ip)
+
+
+@app.post("/api/admin/reset")
+def admin_reset(request: Request) -> dict:
+    """Wipe all records. Mgmt-only (the lab guard 404s this for attacker IPs).
+    Used by the evaluation harness to start each run from a clean slate."""
+    request.app.state.store.reset()
+    return {"status": "reset"}
