@@ -125,7 +125,12 @@ Plan and requirements: [plan.md](plan.md), [requirements.md](requirements.md).
 
 ### Step 7: Dashboard (`controller/app/static/`, `broadcast.py`)
 - Single page served at `/` by the controller: first paint from the REST reads, live updates over `/ws`. `ingest_event` and the response engine push `event`/`alert`/`attacker`/`response` deltas through a thread-safe `Publisher` (captured loop + `run_coroutine_threadsafe`), so the sync ingest path never blocks on the async fan-out.
-- Shows the live event feed (sorted by timestamp), each attacker's 6-stage trail with risk and playbook, credential theft, alerts, the response log and the ATT&CK techniques seen (by name). Manual Contain / Release buttons.
+- Laid out for a projector, read top to bottom:
+  1. **One plain sentence** that says what the intruder just did (typed out live) and how fast Mirage cut them off.
+  2. **Trap depth HUD**: a radar where each ring is a trail stage and the crown jewel (`passwords.xlsx`) sits in the centre. The intruder blip spirals inward as it takes each bait, an amber halo marks tarpit, and a green shield closes when containment fires. Beside it, a stage ledger with the time each stage was reached, and the intruder card: risk with watch / slow down / contain bands, time to detect and contain, which decoys acknowledged the block, and manual Contain / Release buttons.
+  3. **Campaign replay**: one lane per decoy plus Mirage's own alerts and responses, the trail-depth step line, T0 and the containment cut. Hovering a mark shows the event.
+  4. **Detail drawer** (tabs): live feed, stolen credentials, ATT&CK tactic matrix and techniques, alerts, response log.
+- One colour per meaning: cyan = interface, amber = trail walked, red = intruder, green = stopped. Every animation is triggered by a real event; `prefers-reduced-motion` turns them off.
 - Every attacker-controlled field is rendered with `textContent`, never `innerHTML`.
 - **Lab lockdown:** the attacker shares the lab subnet, so an HTTP middleware and a `/ws` guard 404 (or close) any lab-side request that is not token-gated `POST /api/events` or `/health`. The dashboard, reads and controls answer only on the mgmt side. Subnet is `MIRAGE_LAB_SUBNET` (default `10.66.0.0/24`).
 

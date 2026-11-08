@@ -3,249 +3,133 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mirage · deception lab</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='36' fill='none' stroke='%23ffc247' stroke-width='6'/><circle cx='50' cy='50' r='10' fill='%23ff4438'/></svg>" />
+  <title>Mirage · deception console</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='none' stroke='%235ad7f0' stroke-width='6' stroke-dasharray='18 8'/><circle cx='50' cy='50' r='22' fill='none' stroke='%235ad7f0' stroke-width='5'/><path d='M50 40 60 50 50 60 40 50z' fill='%23ff4d45'/></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=17" />
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=18" />
 </head>
 <body data-band="idle">
-  <div class="atmo" aria-hidden="true"></div>
+  <div class="backdrop" aria-hidden="true"></div>
+  <div class="flash" id="flash" aria-hidden="true"></div>
 
-  <header class="top">
+  <!-- ============================== command bar -->
+  <header class="bar">
     <div class="brand">
-      <span class="mark" aria-hidden="true"><i></i></span>
-      <span class="wordmark">Mirage</span>
-      <span class="brand-sub">Deception lab · 10.66.0.0/24 · active response</span>
-    </div>
-
-    <div class="ladder-wrap" title="Highest risk across intruders. Bands: watch under 40, tarpit 40 to 74, contain 75 and up">
-      <span class="ladder-k">Risk</span>
-      <div class="ladder">
-        <div class="ladder-band b1"></div><div class="ladder-band b2"></div><div class="ladder-band b3"></div>
-        <div class="ladder-pin" id="ladder-pin"></div>
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="7 3" />
+        <circle cx="20" cy="20" r="9" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <path d="M20 15 25 20 20 25 15 20z" fill="var(--red)" />
+      </svg>
+      <div class="brand-text">
+        <span class="wordmark">MIRAGE</span>
+        <span class="brand-sub">Deception console · lab 10.66.0.0/24</span>
       </div>
-      <span class="ladder-read mono" id="ladder-read">0 · clear</span>
     </div>
 
-    <div class="top-right">
+    <ol class="decoys" aria-label="Decoys">
+      <li class="decoy" id="dc-admin"><i></i><b>Admin panel</b><span class="mono">10.66.0.20</span><em id="dcs-admin">armed</em></li>
+      <li class="decoy" id="dc-ssh"><i></i><b>SSH server</b><span class="mono">10.66.0.21</span><em id="dcs-ssh">armed</em></li>
+      <li class="decoy" id="dc-s3"><i></i><b>S3 bucket</b><span class="mono">10.66.0.22</span><em id="dcs-s3">armed</em></li>
+    </ol>
+
+    <div class="bar-right">
+      <span class="mode mono">Active response</span>
       <span class="clock mono" id="clock">00:00:00</span>
-      <span class="live" id="conn"><i class="live-dot"></i><span id="conn-text">linking</span></span>
+      <span class="link" id="conn"><i></i><span id="conn-text">linking</span></span>
     </div>
   </header>
 
   <main class="page">
 
-    <!-- ============================== hero: the lab as a living floor -->
-    <section class="hero" id="hero" aria-label="Lab topology">
-      <canvas id="net" class="net"></canvas>
+    <!-- ============================== 1 · the sentence -->
+    <section class="brief" aria-live="polite">
+      <div class="brief-kicker mono" id="kicker"><span class="live-tag">Standby</span><span>3 decoys armed · 6-stage breadcrumb trail</span></div>
+      <h1 class="say" id="say">Decoys armed. Nothing has touched the trap yet.</h1>
+    </section>
 
-      <div class="tiles" id="tiles" aria-hidden="false">
-        <div class="tile t-atk" id="tile-atk">
-          <span class="tile-role">Intruder</span>
-          <span class="tile-name mono" id="atk-ip">none yet</span>
-          <span class="tile-state" id="atk-state">no contact</span>
-        </div>
-        <div class="tile t-decoy" id="tile-admin">
-          <span class="tile-role">Decoy · stages 1 to 2</span>
-          <span class="tile-name">Admin panel</span>
-          <span class="tile-ip mono">10.66.0.20</span>
-          <span class="tile-state" id="st-admin">armed</span>
-          <span class="tile-count mono" id="ct-admin">0</span>
-        </div>
-        <div class="tile t-decoy" id="tile-ssh">
-          <span class="tile-role">Decoy · stages 3 to 4</span>
-          <span class="tile-name">SSH server</span>
-          <span class="tile-ip mono">10.66.0.21</span>
-          <span class="tile-state" id="st-ssh">armed</span>
-          <span class="tile-count mono" id="ct-ssh">0</span>
-        </div>
-        <div class="tile t-decoy" id="tile-s3">
-          <span class="tile-role">Decoy · stages 5 to 6</span>
-          <span class="tile-name">S3 bucket</span>
-          <span class="tile-ip mono">10.66.0.22</span>
-          <span class="tile-state" id="st-s3">armed</span>
-          <span class="tile-count mono" id="ct-s3">0</span>
-        </div>
-        <div class="tile t-ctrl" id="tile-ctrl">
-          <span class="tile-role">Controller</span>
-          <span class="tile-name">Mirage brain</span>
-          <span class="tile-ip mono">10.66.0.10</span>
-          <span class="tile-state" id="st-ctrl">watching 3 decoys</span>
-        </div>
-        <div class="tile t-legit" id="tile-legit">
-          <span class="tile-role">Real intranet</span>
-          <span class="tile-name">Staff portal</span>
-          <span class="tile-ip mono">10.66.0.30</span>
-          <span class="tile-state">benign traffic · never touches a decoy</span>
+    <!-- ============================== 2 · HUD + intruder -->
+    <section class="ops">
+      <div class="frame hud-frame">
+        <header class="fhead"><span class="fidx">01</span><h2>Trap depth</h2><span class="rule"></span><span class="fmeta mono" id="hud-meta">outer ring = first bait · centre = crown jewel</span></header>
+        <div class="hud-body">
+          <ol class="ledger" id="ledger" aria-label="Breadcrumb trail"></ol>
+          <div class="hud-wrap" id="hud-wrap"><canvas id="hud" aria-label="Radial view of how deep each intruder got into the trap"></canvas></div>
         </div>
       </div>
 
-      <div class="hero-head">
-        <p class="kicker" id="hero-kicker">Isolated lab · 3 decoys · 6-stage breadcrumb trail</p>
-        <h1 class="headline" id="hero-line">Decoys armed. Nothing in the trap.</h1>
-      </div>
+      <aside class="frame intruder" id="intruder">
+        <header class="fhead"><span class="fidx">02</span><h2>Intruder</h2><span class="rule"></span>
+          <span class="picker" id="picker" hidden>
+            <button type="button" id="pick-prev" aria-label="Previous intruder">◂</button>
+            <span class="mono" id="pick-n">1/1</span>
+            <button type="button" id="pick-next" aria-label="Next intruder">▸</button>
+          </span>
+        </header>
 
-      <aside class="intruder glass" id="intruder">
-        <div class="int-head">
-          <span class="int-label">Intruder</span>
-          <span class="int-seen mono" id="int-seen">not seen</span>
+        <div class="int-id">
+          <div class="int-ip" id="int-ip">—.—.—.—</div>
+          <div class="stamp" id="stamp">No contact</div>
         </div>
-        <div class="int-ip display" id="int-ip">0.0.0.0</div>
-        <div class="int-verdict" id="int-verdict"><i></i><span id="int-verdict-word">decoys armed</span></div>
+        <div class="int-seen mono" id="int-seen">Waiting for first contact</div>
 
-        <div class="int-risk">
-          <div class="risk-top"><span class="risk-num display" id="int-risk">0</span><span class="risk-k">risk<br/>of 100</span></div>
-          <div class="risk-bar"><div class="risk-fill" id="risk-fill"></div><i class="th" style="left:40%"></i><i class="th" style="left:75%"></i></div>
-          <div class="risk-keys"><span>watch</span><span>tarpit</span><span>contain</span></div>
-        </div>
-
-        <div class="int-trail">
-          <div class="int-trail-top"><span>Trail</span><span class="mono" id="int-stage-word">stage 0 of 6</span></div>
-          <div class="segs" id="int-segs"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="risk">
+          <div class="risk-top"><span class="risk-n" id="risk-n">0</span><span class="risk-of">risk<br />of 100</span><span class="risk-word" id="risk-word">clear</span></div>
+          <div class="risk-segs" id="risk-segs"></div>
+          <div class="risk-keys mono"><span>watch</span><span>slow down · 40</span><span>contain · 75</span></div>
         </div>
 
-        <dl class="int-facts">
-          <div><dt>events</dt><dd class="mono" id="int-events">0</dd></div>
-          <div><dt>techniques</dt><dd class="mono" id="int-tech">0</dd></div>
-          <div><dt>tokens stolen</dt><dd class="mono" id="int-tokens">0</dd></div>
+        <dl class="facts">
+          <div><dt>Detected in</dt><dd id="f-ttd">—</dd></div>
+          <div><dt>Contained in</dt><dd id="f-ttc">—</dd></div>
+          <div><dt>Events</dt><dd id="f-events">0</dd></div>
+          <div><dt>Honeytokens taken</dt><dd id="f-tokens">0<small>/6</small></dd></div>
         </dl>
 
-        <div class="int-actions">
+        <div class="enforce">
+          <span class="enf-k mono">Blocked on</span>
+          <span class="enf" id="enf-admin">Admin</span><span class="enf" id="enf-ssh">SSH</span><span class="enf" id="enf-s3">S3</span>
+        </div>
+
+        <div class="actions">
           <button class="btn btn-contain" id="btn-contain" type="button">Contain now</button>
           <button class="btn btn-release" id="btn-release" type="button">Release</button>
         </div>
       </aside>
     </section>
 
-    <!-- ============================== KPI strip -->
-    <section class="kpis" aria-label="Key numbers">
-      <div class="kpi glass">
-        <span class="kpi-k">In the trap</span>
-        <span class="kpi-v display" id="k-trap">0</span>
-        <span class="kpi-s mono" id="k-trap-s">decoys armed</span>
-      </div>
-      <div class="kpi glass">
-        <span class="kpi-k">Events</span>
-        <span class="kpi-v display" id="k-events">0</span>
-        <span class="kpi-s mono" id="k-events-s">0 ev/s peak</span>
-        <canvas class="spark" id="sp-events" width="92" height="30"></canvas>
-      </div>
-      <div class="kpi glass">
-        <span class="kpi-k">Alerts</span>
-        <span class="kpi-v display" id="k-alerts">0</span>
-        <span class="kpi-s mono" id="k-alerts-s">0 high or worse</span>
-        <canvas class="spark" id="sp-alerts" width="110" height="30"></canvas>
-      </div>
-      <div class="kpi glass">
-        <span class="kpi-k">Highest risk</span>
-        <span class="kpi-v display" id="k-risk">0</span>
-        <span class="kpi-s mono" id="k-risk-s">clear</span>
-        <canvas class="spark" id="sp-risk" width="110" height="30"></canvas>
-      </div>
-      <div class="kpi glass">
-        <span class="kpi-k">Contained</span>
-        <span class="kpi-v display" id="k-contained">0</span>
-        <span class="kpi-s mono" id="k-contained-s">no ban active</span>
-        <div class="decoy-blocks" id="k-blocks"><i></i><i></i><i></i></div>
-      </div>
-      <div class="kpi glass">
-        <span class="kpi-k">Time to contain</span>
-        <span class="kpi-v display" id="k-ttc">·</span>
-        <span class="kpi-s mono" id="k-ttc-s">from first contact</span>
-        <span class="kpi-s mono" id="k-ttd-s">detect lag ·</span>
+    <!-- ============================== 3 · campaign replay -->
+    <section class="frame replay">
+      <header class="fhead"><span class="fidx">03</span><h2>Campaign replay</h2><span class="rule"></span>
+        <span class="fmeta legend mono">
+          <span><i class="k-ev"></i>event</span><span><i class="k-st"></i>new stage</span><span><i class="k-al"></i>alert</span><span><i class="k-tp"></i>slow down</span><span><i class="k-ct"></i>contained</span>
+        </span>
+      </header>
+      <div class="replay-wrap" id="replay-wrap">
+        <canvas id="replay" aria-label="Timeline of the intruder's events on each decoy and Mirage's response"></canvas>
+        <div class="tip" id="tip" hidden></div>
+        <div class="replay-empty" id="replay-empty">The intruder's moves will draw here, one lane per decoy.</div>
       </div>
     </section>
 
-    <!-- ============================== trail + theft -->
-    <section class="row row-trail">
-      <div class="panel glass trail-panel">
-        <div class="panel-head">
-          <h2>Breadcrumb trail</h2>
-          <span class="meta mono" id="trail-meta">no intruder</span>
-        </div>
-        <div class="trail" id="trail">
-          <div class="trail-line"><i class="trail-fill" id="trail-fill"></i><i class="trail-cut" id="trail-cut" hidden></i></div>
-          <ol class="stages" id="stages"></ol>
-        </div>
+    <!-- ============================== 4 · detail drawer -->
+    <section class="frame drawer">
+      <div class="tabs" role="tablist" aria-label="Details">
+        <button role="tab" id="tab-feed" aria-controls="pane-feed" aria-selected="true" type="button">Live feed <b id="n-feed">0</b></button>
+        <button role="tab" id="tab-theft" aria-controls="pane-theft" aria-selected="false" type="button">Stolen credentials <b id="n-theft">0/6</b></button>
+        <button role="tab" id="tab-attack" aria-controls="pane-attack" aria-selected="false" type="button">ATT&amp;CK <b id="n-attack">0</b></button>
+        <button role="tab" id="tab-alerts" aria-controls="pane-alerts" aria-selected="false" type="button">Alerts <b id="n-alerts">0</b></button>
+        <button role="tab" id="tab-resp" aria-controls="pane-resp" aria-selected="false" type="button">Response log <b id="n-resp">0</b></button>
       </div>
-
-      <div class="panel glass theft-panel">
-        <div class="panel-head">
-          <h2>Credential theft</h2>
-          <span class="meta mono" id="theft-meta">0 of 6 honeytokens</span>
-        </div>
-        <div class="theft" id="theft-list"></div>
-        <div class="empty" id="theft-empty">Nothing stolen yet.</div>
-      </div>
-    </section>
-
-    <!-- ============================== timeline + tactics + techniques -->
-    <section class="row row-charts">
-      <div class="panel glass chart-panel">
-        <div class="panel-head">
-          <h2>Campaign timeline</h2>
-          <span class="meta">
-            <span class="leg"><i class="c-admin"></i>admin panel</span>
-            <span class="leg"><i class="c-ssh"></i>ssh</span>
-            <span class="leg"><i class="c-s3"></i>s3</span>
-            <span class="leg"><i class="c-cut"></i>trap sprang</span>
-          </span>
-        </div>
-        <div class="chart-wrap"><canvas id="timeline" class="timeline"></canvas></div>
-        <div class="empty" id="chart-empty">Events per second on each decoy will draw here.</div>
-      </div>
-
-      <div class="panel glass tactics-panel">
-        <div class="panel-head">
-          <h2>Tactics observed</h2>
-          <span class="meta mono" id="tactics-meta">0 of 12</span>
-        </div>
-        <div class="tactics" id="tactics"></div>
-      </div>
-
-      <div class="panel glass tech-panel">
-        <div class="panel-head">
-          <h2>Techniques</h2>
-          <span class="meta mono" id="tech-count">0</span>
-        </div>
-        <div class="techniques" id="tech-list"></div>
-        <div class="empty" id="tech-empty">No ATT&amp;CK techniques labelled yet.</div>
-      </div>
-    </section>
-
-    <!-- ============================== streams -->
-    <section class="row row-streams">
-      <div class="panel glass feed-panel">
-        <div class="panel-head">
-          <h2>Live feed</h2>
-          <span class="meta mono" id="feed-meta">newest first</span>
-        </div>
-        <div class="feed" id="feed-list"></div>
-        <div class="empty" id="feed-empty">Waiting for the first event.</div>
-      </div>
-
-      <div class="panel glass alerts-panel">
-        <div class="panel-head">
-          <h2>Alerts</h2>
-          <span class="meta mono" id="alerts-meta">0</span>
-        </div>
-        <div class="alerts" id="alert-list"></div>
-        <div class="empty" id="alerts-empty">No alerts.</div>
-      </div>
-
-      <div class="panel glass resp-panel">
-        <div class="panel-head">
-          <h2>Response log</h2>
-          <span class="meta"><span class="leg"><i class="c-real"></i>real</span><span class="leg"><i class="c-sim"></i>simulated</span></span>
-        </div>
-        <div class="responses" id="resp-list"></div>
-        <div class="empty" id="resp-empty">No response yet.</div>
-      </div>
+      <div class="pane" role="tabpanel" id="pane-feed" aria-labelledby="tab-feed"><div class="rows" id="feed"></div><p class="empty" id="feed-empty">Waiting for the first event.</p></div>
+      <div class="pane" role="tabpanel" id="pane-theft" aria-labelledby="tab-theft" hidden><div class="theft" id="theft"></div><p class="empty" id="theft-empty">Nothing stolen yet.</p></div>
+      <div class="pane" role="tabpanel" id="pane-attack" aria-labelledby="tab-attack" hidden><div class="matrix" id="matrix"></div><div class="techs" id="techs"></div></div>
+      <div class="pane" role="tabpanel" id="pane-alerts" aria-labelledby="tab-alerts" hidden><div class="rows" id="alerts"></div><p class="empty" id="alerts-empty">No alerts.</p></div>
+      <div class="pane" role="tabpanel" id="pane-resp" aria-labelledby="tab-resp" hidden><div class="rows" id="resp"></div><p class="empty" id="resp-empty">Mirage has not responded to anything yet.</p></div>
     </section>
   </main>
 
-  <script src="/static/app.js?v=17"></script>
+  <script src="/static/app.js?v=18"></script>
 </body>
 </html>
