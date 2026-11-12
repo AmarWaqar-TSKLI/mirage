@@ -1,11 +1,13 @@
 "use strict";
 
-/* Mirage deception console.
+/* Mirage · airspace command.
  *
- * Reads the controller's REST API once for first paint, then applies live
- * deltas from /ws (event, alert, response, attacker). Four views share one
- * state: the narrative sentence, the radial "trap depth" HUD with the intruder
- * card, the campaign replay timeline, and the tabbed detail drawer.
+ * The lab is drawn as airspace. Each decoy is a base, Mirage's controller is
+ * the radar station, and every intruder is a hostile track that flies the real
+ * route between bases as it takes each bait. Containment fires an interceptor.
+ *
+ * Data: one REST read for first paint, then live deltas over /ws
+ * (event, alert, response, attacker).
  *
  * SECURITY: every value from the API is attacker-controlled. It is only ever
  * placed with textContent, DOM attribute setters or canvas fillText, never
@@ -51,12 +53,12 @@ const TACTIC_OF = {
   "T1105": "command-and-control",
 };
 const STAGES = [
-  { n: 1, name: "robots.txt", short: "ROBOTS.TXT", decoy: "admin", token: "ht-robots-backup-link" },
-  { n: 2, name: "Backup .env", short: "BACKUP .ENV", decoy: "admin", token: "ht-env-backup-file" },
-  { n: 3, name: "SSH login", short: "SSH LOGIN", decoy: "ssh", token: "ht-ssh-password" },
-  { n: 4, name: "AWS credentials", short: "AWS KEYS", decoy: "ssh", token: "ht-aws-credentials-file" },
-  { n: 5, name: "S3 access", short: "S3 ACCESS", decoy: "s3", token: "ht-aws-access-key" },
-  { n: 6, name: "passwords.xlsx", short: "PASSWORDS.XLSX", decoy: "s3", token: "ht-passwords-xlsx" },
+  { n: 1, name: "robots.txt", bait: "the robots.txt hint", decoy: "admin", token: "ht-robots-backup-link" },
+  { n: 2, name: "Backup .env", bait: "the leaked backup file", decoy: "admin", token: "ht-env-backup-file" },
+  { n: 3, name: "SSH login", bait: "the SSH login", decoy: "ssh", token: "ht-ssh-password" },
+  { n: 4, name: "AWS keys", bait: "the planted AWS keys", decoy: "ssh", token: "ht-aws-credentials-file" },
+  { n: 5, name: "S3 access", bait: "the S3 bucket", decoy: "s3", token: "ht-aws-access-key" },
+  { n: 6, name: "passwords.xlsx", bait: "the crown jewel", decoy: "s3", token: "ht-passwords-xlsx" },
 ];
 const TOKEN_NAME = {
   "ht-robots-backup-link": "robots.txt breadcrumb", "ht-env-backup-file": "Backup .env file",
@@ -65,43 +67,57 @@ const TOKEN_NAME = {
 };
 const DECOYS = ["admin", "ssh", "s3"];
 const DECOY_OF_SOURCE = { "admin-panel": "admin", ssh: "ssh", s3: "s3" };
-const DECOY_IP = { admin: "10.66.0.20", ssh: "10.66.0.21", s3: "10.66.0.22" };
-const DECOY_NAME = { admin: "Admin panel", ssh: "SSH server", s3: "S3 bucket" };
 const SRC_TAG = { admin: "WEB", ssh: "SSH", s3: "S3" };
-const BAND_WORD = { idle: "clear", watch: "watch", tarpit: "slow down", contain: "contained" };
 
-// canvas colours (the CSS tokens, as rgb triples)
-const C = {
-  hud: [90, 215, 240], amber: [244, 179, 63], red: [255, 77, 69], green: [61, 220, 151],
-  fg: [227, 237, 243], dim: [147, 168, 182], faint: [88, 112, 128], edge: [24, 48, 64], edgeHi: [42, 82, 102],
-  admin: [183, 156, 255], ssh: [90, 215, 240], s3: [244, 179, 63], bg: [4, 7, 11],
+// ------------------------------------------------------------------ the map's world (1000 x 640 units)
+const BASES = {
+  admin: { x: 285, y: 210, name: "Admin panel", ip: "10.66.0.20", role: "Web base", holds: "stages 1–2" },
+  ssh: { x: 515, y: 400, name: "SSH server", ip: "10.66.0.21", role: "Server base", holds: "stages 3–4" },
+  s3: { x: 760, y: 215, name: "S3 bucket", ip: "10.66.0.22", role: "Data vault", holds: "stages 5–6" },
+};
+const STATION = { x: 560, y: 110, name: "Mirage radar", ip: "10.66.0.10" };
+const FRIEND = { x: 150, y: 470, name: "Staff portal", ip: "10.66.0.30" };
+const JEWEL = { x: 885, y: 430, name: "Crown jewel", file: "passwords.xlsx" };
+// where a track sits after reaching each stage; index 0 is the entry corridor off the map
+const ROUTE = [
+  { x: -60, y: 110 }, { x: 170, y: 150 },
+  { x: 245, y: 160 }, { x: 330, y: 168 },
+  { x: 470, y: 352 }, { x: 562, y: 360 },
+  { x: 718, y: 168 }, JEWEL,
+];
+const PLACE = ["the entry corridor", "the admin panel", "the admin panel", "the admin panel", "the SSH server", "the SSH server", "the S3 bucket", "the crown jewel"];
+
+// canvas palette
+const K = {
+  lime: [214, 242, 76], red: [255, 74, 61], amber: [255, 178, 36], fg: [243, 243, 238],
+  mute: [143, 144, 138], faint: [87, 88, 82], line: [36, 37, 34], bg: [7, 8, 7],
 };
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const FONT_MONO = '"JetBrains Mono", ui-monospace, monospace';
-const FONT_DISPLAY = 'Oxanium, "Rajdhani", system-ui, sans-serif';
-const FONT_BODY = '"IBM Plex Sans", system-ui, sans-serif';
-const MAX_EVENTS = 5000, MAX_FEED = 300;
+const MONO = '"Geist Mono", ui-monospace, monospace';
+const SANS = 'Geist, Inter, system-ui, sans-serif';
+const MAX_EVENTS = 5000, MAX_ROWS = 250;
 
 // ------------------------------------------------------------------ state
 const state = {
-  attackers: new Map(),   // ip -> attacker row from the controller
-  events: [],             // ascending by time, each with a cached _t
-  alerts: [], responses: [],
-  selected: null,         // ip the operator picked; null = highest risk
-  fresh: new Map(),       // event id -> arrival time, for live highlights
-  booted: false,          // false while replaying the initial REST load
+  attackers: new Map(), events: [], alerts: [], responses: [],
+  selected: null, booted: false, order: [],   // order = ips by first contact, for T-01, T-02 …
+  fresh: new Map(),
 };
-const dirty = { model: true, feed: true, alerts: true, resp: true, theft: true, attack: true, replay: true };
-const counts = { feed: -1, theft: -1, attack: -1, alerts: -1, resp: -1 };
+const dirty = { model: true, queue: true, charts: true };
+const layers = { route: true, history: true, sweep: true };
 
 // ------------------------------------------------------------------ helpers
 const $ = (id) => document.getElementById(id);
 function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = String(text); return n; }
-function tms(ts) { const t = +new Date(ts); return isNaN(t) ? 0 : t; }
+const SVGNS = "http://www.w3.org/2000/svg";
+function S(tag, attrs, parent, text) { const n = document.createElementNS(SVGNS, tag); for (const k in attrs || {}) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = String(text); if (parent) parent.append(n); return n; }
+const tms = (ts) => { const t = +new Date(ts); return isNaN(t) ? 0 : t; };
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const easeOut = (k) => 1 - Math.pow(1 - clamp(k), 3);
-function fmtTime(ts) { const d = new Date(ts); if (isNaN(d)) return String(ts || ""); return d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0"); }
+const lerp = (a, b, k) => a + (b - a) * k;
+function fmtTime(ts) { const d = new Date(ts); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0"); }
+function fmtClock(ts) { const d = new Date(ts); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour12: false }); }
 function fmtDur(ms) {
   if (ms == null || isNaN(ms)) return "—";
   if (ms < 1) return "<1 ms";
@@ -110,43 +126,27 @@ function fmtDur(ms) {
   const m = Math.floor(ms / 60000), s = Math.round((ms % 60000) / 1000);
   return m + "m " + String(s).padStart(2, "0") + "s";
 }
-function fmtRel(ms) { return "+" + (ms < 60000 ? (Math.max(0, ms) / 1000).toFixed(2) + " s" : fmtDur(ms)); }
-
+const fmtRel = (ms) => "+" + fmtDur(Math.max(0, ms));
 function bandOf(a) {
   if (!a) return "idle";
   if (a.contained_at) return "contain";
   const p = a.playbook; if (p === "watch" || p === "tarpit" || p === "contain") return p;
   const r = a.risk_score || 0; return r >= 75 ? "contain" : r >= 40 ? "tarpit" : "watch";
 }
+const trackId = (ip) => { const i = state.order.indexOf(ip); return "T-" + String(i < 0 ? 0 : i + 1).padStart(2, "0"); };
 function ranked() {
   return [...state.attackers.values()].sort((a, b) =>
-    (b.risk_score || 0) - (a.risk_score || 0) || (b.max_stage || 0) - (a.max_stage || 0) || tms(a.first_seen) - tms(b.first_seen));
+    (!!a.contained_at - !!b.contained_at) || (b.risk_score || 0) - (a.risk_score || 0) || tms(a.first_seen) - tms(b.first_seen));
 }
 function current() {
   if (state.selected && state.attackers.has(state.selected)) return state.attackers.get(state.selected);
   return ranked()[0] || null;
 }
 const eventsOf = (ip) => state.events.filter((e) => e.src_ip === ip);
-function stageTimes(evs) {
-  const ft = {};
-  for (const e of evs) { const s = e.stage || 0; if (s && !(s in ft)) ft[s] = e._t; }
-  return ft;
-}
-function containmentOf(ip) { return state.responses.find((r) => r.src_ip === ip && r.action === "containment_sequence") || null; }
-/** Which decoys acknowledged the block, read from the containment response. */
-function blockedDecoys(a) {
-  if (!a || !a.contained_at) return new Set();
-  const r = containmentOf(a.ip), enf = r && r.details && r.details.actions && r.details.actions.enforcement;
-  if (!enf) return new Set(DECOYS);
-  const reached = Array.isArray(enf) ? enf : (enf.reached || []);
-  const out = new Set();
-  reached.forEach((u, i) => { const d = DECOYS.find((k) => String(u).includes(DECOY_IP[k])); out.add(d || DECOYS[i]); });
-  return out;
-}
+function stageTimes(evs) { const ft = {}; for (const e of evs) { const s = e.stage || 0; if (s && !(s in ft)) ft[s] = e._t; } return ft; }
+function firstAlert(ip) { let f = null; for (const a of state.alerts) if (a.src_ip === ip && (!f || tms(a.ts) < tms(f.ts))) f = a; return f; }
 function detectLag(a) {
-  if (!a) return NaN;
-  const al = state.alerts.filter((x) => x.src_ip === a.ip).sort((x, y) => tms(x.ts) - tms(y.ts))[0];
-  if (!al) return NaN;
+  const al = a && firstAlert(a.ip); if (!al) return NaN;
   const ev = state.events.find((e) => e.id === al.event_id);
   return Math.max(0, tms(al.ts) - (ev ? ev._t : tms(a.first_seen)));
 }
@@ -159,17 +159,15 @@ function describe(e) {
     case "http_request":
     case "file_access":
       t(e.source === "ssh" ? "read " : `${d.method || d.action || "GET"} `); b(e.asset || "/"); if (d.status != null) t(` → ${d.status}`);
-      if (d.user_agent) P.push([` · ${d.user_agent}`, 3]);
       break;
     case "login_attempt":
       t("login as "); b(d.username || e.asset || "?");
-      if (d.password != null) t(` · password "${d.password}"`);
       P.push(d.success ? [" · accepted", 2] : [d.contained ? " · refused, contained" : " · failed", 3]);
       break;
     case "command": t("$ "); b(d.command || ""); break;
-    case "session_start": t("SSH session opened"); if (d.mode) t(` · ${d.mode}`); break;
-    case "session_end": t(`SSH session closed · ${d.commands ?? 0} commands · ${d.duration ?? 0} s`); break;
-    case "honeytoken_used": t("used "); b(TOKEN_NAME[e.honeytoken_id] || e.honeytoken_id || "honeytoken"); if (e.asset) t(` on ${e.asset}`); break;
+    case "session_start": t("SSH session opened"); break;
+    case "session_end": t(`SSH session closed · ${d.commands ?? 0} commands`); break;
+    case "honeytoken_used": t("used "); b(TOKEN_NAME[e.honeytoken_id] || e.honeytoken_id || "honeytoken"); break;
     default: t(String(e.event_type || "event").replace(/_/g, " ") + " "); if (e.asset) b(e.asset);
   }
   return P;
@@ -177,7 +175,8 @@ function describe(e) {
 function partsInto(node, parts) {
   for (const [text, kind] of parts) {
     if (!kind) node.append(text);
-    else node.append(el(kind === 1 ? "b" : "span", kind === 2 ? "ok" : kind === 3 ? "fail" : null, text));
+    else if (kind === 1) node.append(el("code", null, text));
+    else node.append(el("span", kind === 2 ? "ok" : null, text));
   }
   return node;
 }
@@ -190,663 +189,800 @@ function addEvent(e, live) {
   else { let lo = 0, hi = ev.length; while (lo < hi) { const m = (lo + hi) >> 1; if (ev[m]._t <= e._t) lo = m + 1; else hi = m; } ev.splice(lo, 0, e); }
   if (ev.length > MAX_EVENTS) ev.splice(0, ev.length - MAX_EVENTS);
   if (live) {
-    const now = performance.now();
-    state.fresh.set(e.id, now);
-    const d = DECOY_OF_SOURCE[e.source];
-    if (d) { const chip = $("dc-" + d); chip.classList.remove("ping"); void chip.offsetWidth; chip.classList.add("ping"); }
-    hudPulse(e.src_ip, e.stage ? C.red : C.hud, now);
+    state.fresh.set(e.id, performance.now());
+    const d = DECOY_OF_SOURCE[e.source]; if (d) basePing(d, e.stage ? K.red : K.fg);
   }
-  dirty.model = dirty.feed = dirty.replay = dirty.attack = true;
-  if (e.honeytoken_id) dirty.theft = true;
+  dirty.model = dirty.queue = dirty.charts = true;
 }
-function addAlert(a) { state.alerts.unshift(a); if (state.alerts.length > 300) state.alerts.length = 300; dirty.alerts = dirty.model = dirty.replay = true; }
-function addResponse(r) { state.responses.unshift(r); if (state.responses.length > 200) state.responses.length = 200; dirty.resp = dirty.model = dirty.replay = true; }
+function addAlert(a) { state.alerts.unshift(a); if (state.alerts.length > 300) state.alerts.length = 300; dirty.model = dirty.queue = dirty.charts = true; }
+function addResponse(r) {
+  state.responses.unshift(r); if (state.responses.length > 200) state.responses.length = 200;
+  if (state.booted && r.action === "throttle_connection") toast("warn", "!", `${trackId(r.src_ip)} is being slowed down`, "Every request from it now waits before it is answered.");
+  dirty.model = dirty.queue = dirty.charts = true;
+}
 function upsertAttacker(a) {
   const prev = state.attackers.get(a.ip);
+  if (!state.order.includes(a.ip)) state.order.push(a.ip);
   state.attackers.set(a.ip, a);
+  const tr = track(a.ip);
   if (state.booted) {
-    if (prev && (a.max_stage || 0) > (prev.max_stage || 0)) onStage(a, prev.max_stage || 0);
-    if (a.contained_at && !(prev && prev.contained_at)) onContained(a);
-  }
-  dirty.model = dirty.replay = dirty.theft = true;
+    if (!prev) { toast("hot", "◆", `New hostile contact ${trackId(a.ip)}`, `${a.ip} touched a decoy. Tracking it now.`); flashEdge(K.red); }
+    if (prev && (a.max_stage || 0) > (prev.max_stage || 0)) {
+      const s = STAGES[(a.max_stage || 1) - 1];
+      toast("hot", String(a.max_stage), `${trackId(a.ip)} took ${s.bait}`, `Stage ${a.max_stage} of 6 · now at ${PLACE[a.max_stage + 1]}.`);
+      flashEdge(K.red); tr.flareAt = performance.now();
+    }
+    if (a.contained_at && !(prev && prev.contained_at)) {
+      tr.missileAt = performance.now();
+      setTimeout(() => { toast("win", "✓", `${trackId(a.ip)} intercepted`, `Blocked on every decoy ${fmtDur(tms(a.contained_at) - tms(a.first_seen))} after first contact.`); flashEdge(K.lime); }, RM ? 0 : 1100);
+    }
+    if (prev && prev.contained_at && !a.contained_at) toast("warn", "↺", `${trackId(a.ip)} released`, "The block was lifted. Mirage is tracking it again.");
+  } else if (a.contained_at) tr.missileAt = -1e9;   // already intercepted before the page opened
+  dirty.model = dirty.queue = dirty.charts = true;
 }
 
-// One-off effects for live transitions. They never run during the initial load.
-function onStage(a, from) {
-  const now = performance.now();
-  const b = hudBlip(a.ip);
-  for (let k = from + 1; k <= (a.max_stage || 0); k++) b.ringAt[k] = now + (k - from - 1) * 180;
-  const cur = current();
-  if (cur && cur.ip === a.ip) ledgerFlash.set(a.max_stage || 0, now);
+// ------------------------------------------------------------------ toasts + edge pulse
+function toast(kind, icon, title, text) {
+  const host = $("toasts"), t = el("div", "toast " + (kind === "win" ? "win" : kind === "warn" ? "warn" : ""));
+  const b = el("div"); b.append(el("b", null, title), el("span", null, text));
+  t.append(el("i", null, icon), b); host.append(t);
+  while (host.children.length > 4) host.firstChild.remove();
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 400); }, 5000);
 }
-function onContained(a) {
-  hudBlip(a.ip).shieldAt = performance.now();
-  const cur = current();
-  if (cur && cur.ip === a.ip) {
-    const s = $("stamp"); s.classList.remove("slam"); void s.offsetWidth; s.classList.add("slam");
-    if (!RM) { const f = $("flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
+function flashEdge(c) { if (RM) return; const e = $("edge"); e.style.setProperty("--c", rgba(c, .5)); e.classList.remove("go"); void e.offsetWidth; e.classList.add("go"); }
+
+// ------------------------------------------------------------------ hero
+let headKey = "";
+function renderHero() {
+  const list = ranked(), a = current(), live = list.filter((x) => !x.contained_at);
+  let words;
+  if (!a) words = [["Airspace", ""], ["clear", "em"]];
+  else if (live.length > 1) words = [["Tracking", ""], [`${live.length} hostiles`, "hot"]];
+  else if (live.length === 1) words = [["Hostile", ""], [trackId(live[0].ip), "hot"], ["inbound", ""]];
+  else words = [[list.length > 1 ? `${list.length} tracks` : trackId(a.ip), ""], ["intercepted", "em"]];
+  const key = words.map((w) => w.join(":")).join("|");
+  if (key !== headKey) {
+    headKey = key;
+    const h = $("headline"); h.replaceChildren();
+    words.forEach(([text, cls], i) => {
+      const w = el(cls === "em" ? "em" : "span", "w" + (cls === "hot" ? " hot" : ""), text); w.style.setProperty("--d", i);
+      if (i) h.append(" "); h.append(w);
+    });
   }
+  // the plain-language sentence
+  const sub = $("subline"); sub.replaceChildren();
+  if (!a) sub.append("No contacts. Every decoy is armed and the radar is sweeping the lab.");
+  else {
+    const st = a.max_stage || 0, ip = el("b", null, a.ip);
+    if (a.contained_at) sub.append(ip, ` reached stage ${st} of 6, then Mirage blocked it on every decoy `, el("b", null, fmtDur(tms(a.contained_at) - tms(a.first_seen))), " after first contact.");
+    else {
+      const lines = [
+        " is probing the admin panel for hidden pages.",
+        " took the first bait: robots.txt pointed it to a hidden /backup/ folder.",
+        " downloaded the fake backup file, which leaks an SSH password.",
+        " logged in to the SSH decoy with the leaked password.",
+        " stole the planted AWS keys from the SSH server.",
+        " is using the stolen keys on the S3 bucket.",
+        " downloaded passwords.xlsx, the last bait.",
+      ];
+      sub.append(ip, lines[st] || lines[0]);
+      if (bandOf(a) === "tarpit") sub.append(" Mirage is slowing it down.");
+    }
+  }
+  $("eyebrow").textContent = a
+    ? `First contact ${fmtClock(a.first_seen)} · ${a.event_count || 0} events · ${(a.tokens || []).length} of 6 baits taken`
+    : "Deception lab · 3 decoy bases armed";
 }
 
-// ------------------------------------------------------------------ 1 · the sentence
-const say = { key: "", parts: [], start: 0, shown: -1 };
-function sentence(a) {
-  if (!a) return [["Decoys armed. Nothing has touched the trap yet.", 0]];
-  const ip = [a.ip, "ip"], st = a.max_stage || 0;
-  if (a.contained_at) {
-    const ttc = tms(a.contained_at) - tms(a.first_seen);
-    return [ip, [` got ${st} of 6 stages into the trap. `, 0], [`Mirage cut them off ${fmtDur(ttc)} after first contact.`, "ok"]];
-  }
-  const evs = eventsOf(a.ip), last = evs[evs.length - 1];
-  const tail = bandOf(a) === "tarpit" ? [[" Mirage is slowing them down.", "hl"]] : [];
-  if (last && last.event_type === "login_attempt" && !(last.details || {}).success && st < 3) {
-    const n = evs.filter((e) => e.event_type === "login_attempt" && !(e.details || {}).success).length;
-    return [ip, [" is guessing SSH passwords: ", 0], [`${n} failed so far.`, "hl"], ...tail];
-  }
-  const by = {
-    0: [[" is probing the admin panel for hidden pages.", 0]],
-    1: [[" took the first bait. ", 0], ["robots.txt pointed them to a hidden /backup/ folder.", "hl"]],
-    2: [[" downloaded the fake backup file. ", 0], ["It leaks an SSH password.", "hl"]],
-    3: [[" logged in to the SSH decoy ", 0], ["with the leaked password.", "hl"]],
-    4: [[" stole the planted ", 0], ["AWS keys", "hl"], [" from ~/.aws/credentials.", 0]],
-    5: [[" is using the stolen keys ", 0], ["against the S3 bucket.", "hl"]],
-    6: [[" downloaded ", 0], ["passwords.xlsx", "hl"], [", the last bait in the trail.", 0]],
+// ------------------------------------------------------------------ KPI counters
+const counters = new Map();
+function countTo(id, value, fmt) {
+  const node = $(id), c = counters.get(id) || { v: 0, to: 0 };
+  if (c.to === value && c.done) return;
+  const from = c.v, start = performance.now(), dur = RM ? 0 : 700;
+  c.to = value; c.done = false; counters.set(id, c);
+  const card = node.closest(".kpi");
+  if (card && value > from && state.booted) { card.classList.remove("bump"); void card.offsetWidth; card.classList.add("bump"); }
+  const step = (now) => {
+    const k = dur ? easeOut((now - start) / dur) : 1; c.v = lerp(from, value, k);
+    node.textContent = fmt ? fmt(c.v) : Math.round(c.v).toLocaleString();
+    if (k < 1 && c.to === value) requestAnimationFrame(step); else if (k >= 1) c.done = true;
   };
-  return [ip, ...(by[st] || by[0]), ...tail];
+  requestAnimationFrame(step);
 }
-function updateSentence(now) {
-  const a = current(), parts = sentence(a), key = parts.map((p) => p[0]).join("");
-  if (key !== say.key) { say.key = key; say.parts = parts; say.start = now; say.shown = -1; }
-  const total = key.length, n = RM || !state.booted ? total : Math.min(total, Math.floor((now - say.start) * 0.075));
-  if (n === say.shown) return;
-  say.shown = n;
-  const h = $("say"); h.replaceChildren();
-  let left = n;
-  for (const [text, cls] of say.parts) {
-    if (left <= 0) break;
-    const piece = text.slice(0, left); left -= piece.length;
-    if (cls) h.append(el("span", cls, piece)); else h.append(piece);
+function renderKpis() {
+  const list = ranked(), live = list.filter((x) => !x.contained_at), a = current();
+  countTo("k-tracks", live.length);
+  $("k-tracks-tag").textContent = list.length ? `${list.length - live.length} intercepted` : "clear";
+  $("k-tracks").closest(".kpi").classList.toggle("alarm", live.length > 0);
+  countTo("k-alerts", state.alerts.length);
+  $("k-alerts-tag").textContent = `${state.alerts.filter((x) => x.severity === "critical" || x.severity === "high").length} high or critical`;
+  const ttc = a && a.contained_at ? tms(a.contained_at) - tms(a.first_seen) : null;
+  if (ttc == null) { $("k-ttc").textContent = "—"; counters.delete("k-ttc"); }
+  else countTo("k-ttc", ttc, (v) => (v < 1000 ? Math.round(v) + "ms" : (v / 1000).toFixed(v < 10000 ? 2 : 1) + "s"));
+  $("k-ttc-tag").textContent = ttc == null ? "no intercept" : `stage ${a.max_stage || 0} of 6`;
+  const bn = $("bell-n"); bn.hidden = !state.alerts.length; bn.textContent = state.alerts.length > 99 ? "99+" : state.alerts.length;
+}
+
+// ------------------------------------------------------------------ map
+const map = {
+  cv: null, g: null, W: 0, H: 0, dpr: 1,
+  cam: { x: 500, y: 320, z: 1 }, tgt: { x: 500, y: 320, z: 1 },
+  follow: false, drag: null, hover: null, mouse: null,
+  terrain: null, cache: null, cacheKey: "",
+  pings: [], tracks: new Map(), sweep: 0, last: 0,
+};
+function track(ip) {
+  let t = map.tracks.get(ip);
+  if (!t) {
+    const u = (() => { let h = 2166136261; for (const ch of ip) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; })();
+    t = { pos: 0, off: (u - 0.5) * 30, hist: [], histAt: 0, sweptAt: 0, lockAt: 0, flareAt: 0, missileAt: 0 };
+    map.tracks.set(ip, t);
   }
-  if (n < total) h.append(el("span", "caret"));
+  return t;
+}
+function routeAt(f, off) {
+  const i = clamp(Math.floor(f), 0, ROUTE.length - 2), u = clamp(f - i);
+  const a = ROUTE[i], b = ROUTE[i + 1];
+  const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+  return { x: lerp(a.x, b.x, u) - dy / L * off, y: lerp(a.y, b.y, u) + dx / L * off, ang: Math.atan2(dy, dx) };
+}
+function basePing(d, col) {
+  if (RM) return; const now = performance.now(), last = map.pings.filter((p) => p.d === d).pop();
+  if (last && now - last.t < 140) return;
+  map.pings.push({ d, t: now, col }); if (map.pings.length > 40) map.pings.shift();
 }
 
-// ------------------------------------------------------------------ 2 · ledger + intruder card
-const ledgerFlash = new Map();   // stage -> when it was reached, so a rebuild resumes the highlight
-const riskShown = { v: 0 };
-function renderModel() {
-  const list = ranked(), a = current(), band = bandOf(a);
-  document.body.dataset.band = band;
+// terrain: contour lines from a smooth field, built once with marching squares
+function buildTerrain() {
+  const f = (x, y) => Math.sin(x * 0.0105 + 1.3) * Math.cos(y * 0.0128 - 0.7) + 0.6 * Math.sin((x + y) * 0.0068 + 2.1)
+    + 0.45 * Math.cos(x * 0.019 - y * 0.016) + 0.28 * Math.sin(y * 0.024 + x * 0.004);
+  const step = 11, x0 = -220, y0 = -200, nx = 132, ny = 96, vals = new Float32Array((nx + 1) * (ny + 1));
+  for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) vals[j * (nx + 1) + i] = f(x0 + i * step, y0 + j * step);
+  const minor = [], major = [];
+  const CASES = { 1: [[3, 2]], 2: [[2, 1]], 3: [[3, 1]], 4: [[0, 1]], 5: [[3, 0], [2, 1]], 6: [[0, 2]], 7: [[3, 0]], 8: [[3, 0]], 9: [[0, 2]], 10: [[0, 1], [3, 2]], 11: [[0, 1]], 12: [[3, 1]], 13: [[2, 1]], 14: [[3, 2]] };
+  let li = 0;
+  for (let lv = -1.8; lv <= 1.8; lv += 0.18, li++) {
+    const out = li % 4 === 0 ? major : minor;
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const a = vals[j * (nx + 1) + i], b = vals[j * (nx + 1) + i + 1], c = vals[(j + 1) * (nx + 1) + i + 1], d = vals[(j + 1) * (nx + 1) + i];
+      const idx = (a > lv ? 8 : 0) | (b > lv ? 4 : 0) | (c > lv ? 2 : 0) | (d > lv ? 1 : 0);
+      const segs = CASES[idx]; if (!segs) continue;
+      const X = x0 + i * step, Y = y0 + j * step;
+      const pt = (e) => e === 0 ? [X + step * (lv - a) / (b - a), Y] : e === 1 ? [X + step, Y + step * (lv - b) / (c - b)]
+        : e === 2 ? [X + step * (lv - d) / (c - d), Y + step] : [X, Y + step * (lv - a) / (d - a)];
+      for (const [e1, e2] of segs) { const p = pt(e1), q = pt(e2); out.push(p[0], p[1], q[0], q[1]); }
+    }
+  }
+  map.terrain = { minor: new Float32Array(minor), major: new Float32Array(major) };
+}
+function scale() { return Math.min(map.W / 1000, map.H / 640) * 0.94 * map.cam.z; }
+function toScreen(x, y) { const s = scale(); return [(x - map.cam.x) * s + map.W / 2, (y - map.cam.y) * s + map.H / 2]; }
+function toWorld(sx, sy) { const s = scale(); return [(sx - map.W / 2) / s + map.cam.x, (sy - map.H / 2) / s + map.cam.y]; }
+function sizeMap() {
+  const wrap = $("map-wrap"), dpr = Math.min(devicePixelRatio || 1, 2);
+  map.cv = $("map"); map.g = map.cv.getContext("2d"); map.dpr = dpr;
+  map.W = wrap.clientWidth; map.H = wrap.clientHeight;
+  map.cv.width = Math.round(map.W * dpr); map.cv.height = Math.round(map.H * dpr);
+  map.cacheKey = "";
+}
 
-  // kicker
-  const k = $("kicker"); k.replaceChildren();
-  k.append(el("span", "live-tag", !a ? "Standby" : a.contained_at ? "Contained" : "Live intrusion"));
-  if (a) {
-    k.append(el("span", null, `First contact ${fmtTime(a.first_seen)}`), el("span", null, `${a.event_count || 0} events`),
-      el("span", null, `${(a.tokens || []).length} of 6 honeytokens`));
-    if (list.length > 1) k.append(el("span", null, `${list.length} intruders in the lab`));
-  } else k.append(el("span", null, "3 decoys armed · 6-stage breadcrumb trail · watching 10.66.0.0/24"));
+/** The parts of the map that only change with the camera, cached to an offscreen canvas. */
+function drawStatic() {
+  const key = `${map.W}x${map.H}:${map.cam.x.toFixed(1)}:${map.cam.y.toFixed(1)}:${map.cam.z.toFixed(3)}`;
+  if (key === map.cacheKey && map.cache) return map.cache;
+  map.cacheKey = key;
+  const c = map.cache || document.createElement("canvas");
+  c.width = map.cv.width; c.height = map.cv.height;
+  const g = c.getContext("2d"); g.setTransform(map.dpr, 0, 0, map.dpr, 0, 0);
+  const s = scale(), W = map.W, H = map.H;
+  g.fillStyle = rgba(K.bg, 1); g.fillRect(0, 0, W, H);
+  // terrain
+  const strokeSegs = (arr, col, w) => {
+    g.beginPath();
+    for (let i = 0; i < arr.length; i += 4) { const [ax, ay] = toScreen(arr[i], arr[i + 1]); const [bx, by] = toScreen(arr[i + 2], arr[i + 3]); g.moveTo(ax, ay); g.lineTo(bx, by); }
+    g.strokeStyle = col; g.lineWidth = w; g.stroke();
+  };
+  strokeSegs(map.terrain.minor, "rgba(255,255,255,.035)", 1);
+  strokeSegs(map.terrain.major, "rgba(255,255,255,.075)", 1);
+  // grid with map references along the edges (A, B, C … across, 1, 2, 3 … down)
+  g.strokeStyle = "rgba(255,255,255,.045)"; g.lineWidth = 1; g.font = `10px ${MONO}`; g.fillStyle = rgba(K.faint, 1);
+  for (let gx = -200; gx <= 1200; gx += 50) { const [x] = toScreen(gx, 0); if (x < 0 || x > W) continue; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); if (gx >= 0 && gx < 1000) { g.textAlign = "center"; g.fillText(String.fromCharCode(65 + gx / 50), x + 25 * s, 14); } }
+  for (let gy = -200; gy <= 840; gy += 50) { const [, y] = toScreen(0, gy); if (y < 0 || y > H) continue; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); if (gy >= 0 && gy < 640) { g.textAlign = "left"; g.fillText(String(gy / 50 + 1), 6, y + 25 * s + 3); } }
+  // radar range rings and bearings around the station
+  const [sx, sy] = toScreen(STATION.x, STATION.y);
+  g.setLineDash([2, 6]);
+  for (let r = 150; r <= 750; r += 150) { g.strokeStyle = rgba(K.lime, r % 300 ? .07 : .12); g.beginPath(); g.arc(sx, sy, r * s, 0, Math.PI * 2); g.stroke(); }
+  g.setLineDash([]);
+  for (let deg = 0; deg < 360; deg += 10) {
+    const a = (deg - 90) * Math.PI / 180, r1 = 150 * s, r2 = r1 + (deg % 30 ? 4 : 9);
+    g.strokeStyle = rgba(K.lime, deg % 30 ? .25 : .5); g.beginPath(); g.moveTo(sx + Math.cos(a) * r1, sy + Math.sin(a) * r1); g.lineTo(sx + Math.cos(a) * r2, sy + Math.sin(a) * r2); g.stroke();
+    if (deg % 90 === 0) { g.fillStyle = rgba(K.lime, .7); g.textAlign = "center"; g.fillText(["N", "E", "S", "W"][deg / 90], sx + Math.cos(a) * (r2 + 10), sy + Math.sin(a) * (r2 + 10) + 3); }
+  }
+  // network links between the bases
+  g.setLineDash([3, 5]); g.strokeStyle = "rgba(255,255,255,.12)"; g.lineWidth = 1;
+  const link = (p, q) => { const [ax, ay] = toScreen(p.x, p.y), [bx, by] = toScreen(q.x, q.y); g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke(); };
+  link(BASES.admin, BASES.ssh); link(BASES.ssh, BASES.s3); link(BASES.s3, JEWEL); link(FRIEND, BASES.admin);
+  g.setLineDash([]);
+  // entry corridor
+  g.font = `600 10px ${MONO}`; g.fillStyle = rgba(K.mute, .8); g.textAlign = "left";
+  const [ex, ey] = toScreen(20, 92); g.fillText("ENTRY CORRIDOR ▸", Math.max(8, ex), ey);
+  return c;
+}
+function hexPath(g, x, y, r) { g.beginPath(); for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; i ? g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r) : g.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); }
+function label(g, text, x, y, col, size, weight, align) {
+  g.font = `${weight || 500} ${size}px ${size < 12 ? MONO : SANS}`; g.textAlign = align || "center"; g.fillStyle = col; g.fillText(text, x, y);
+}
+function drawMap(now) {
+  const g = map.g; if (!g) return;
+  const dt = map.last ? Math.min(0.1, (now - map.last) / 1000) : 0; map.last = now;
+  // camera eases toward its target
+  const sel = current(), tsel = sel ? track(sel.ip) : null;
+  if (map.follow && tsel && !map.drag) { const p = routeAt(tsel.pos, tsel.off); map.tgt.x = p.x; map.tgt.y = p.y; }
+  const k = RM ? 1 : 1 - Math.exp(-dt * 7);
+  map.cam.x = lerp(map.cam.x, map.tgt.x, k); map.cam.y = lerp(map.cam.y, map.tgt.y, k); map.cam.z = lerp(map.cam.z, map.tgt.z, k);
+  if (Math.abs(map.cam.x - map.tgt.x) < 0.05) map.cam.x = map.tgt.x;
+  if (Math.abs(map.cam.y - map.tgt.y) < 0.05) map.cam.y = map.tgt.y;
+  if (Math.abs(map.cam.z - map.tgt.z) < 0.0005) map.cam.z = map.tgt.z;
 
-  // decoy chips in the bar
-  const hits = { admin: 0, ssh: 0, s3: 0 };
-  for (const e of state.events) { const d = DECOY_OF_SOURCE[e.source]; if (d) hits[d]++; }
-  const anyBlocked = new Set(); for (const x of list) for (const d of blockedDecoys(x)) anyBlocked.add(d);
+  g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(drawStatic(), 0, 0);
+  g.setTransform(map.dpr, 0, 0, map.dpr, 0, 0);
+  const s = scale(), W = map.W, H = map.H;
+  const [sx, sy] = toScreen(STATION.x, STATION.y);
+
+  // radar sweep from the Mirage station
+  const prevSweep = map.sweep;
+  map.sweep = RM ? -Math.PI / 2 : (now * 0.0011) % (Math.PI * 2);
+  if (layers.sweep && !RM && g.createConicGradient) {
+    const cg = g.createConicGradient(map.sweep - 0.75, sx, sy);
+    cg.addColorStop(0, "rgba(214,242,76,0)"); cg.addColorStop(0.118, "rgba(214,242,76,.09)"); cg.addColorStop(0.1194, "rgba(214,242,76,.45)"); cg.addColorStop(0.121, "rgba(214,242,76,0)"); cg.addColorStop(1, "rgba(214,242,76,0)");
+    g.fillStyle = cg; g.beginPath(); g.arc(sx, sy, 760 * s, 0, Math.PI * 2); g.fill();
+  }
+  const swept = (x, y) => {
+    if (!layers.sweep || RM) return true;
+    const a = (Math.atan2(y - STATION.y, x - STATION.x) + Math.PI * 2) % (Math.PI * 2);
+    return prevSweep <= map.sweep ? a > prevSweep && a <= map.sweep : a > prevSweep || a <= map.sweep;
+  };
+
+  const attackers = ranked();
+  const hitBy = { admin: 0, ssh: 0, s3: 0 }, blocking = new Set();
+  for (const a of attackers) {
+    const st = a.max_stage || 0;
+    hitBy.admin += 1; if (st >= 3) hitBy.ssh += 1; if (st >= 5) hitBy.s3 += 1;
+    if (a.contained_at) DECOYS.forEach((d) => blocking.add(d));
+  }
+
+  // base sectors, pings, and the bases themselves
   for (const d of DECOYS) {
-    const chip = $("dc-" + d), blocked = anyBlocked.has(d);
-    chip.classList.toggle("hit", hits[d] > 0 && !blocked); chip.classList.toggle("blocked", blocked);
-    $("dcs-" + d).textContent = blocked ? "blocking" : hits[d] ? `${hits[d]} events` : "armed";
+    const b = BASES[d], [bx, by] = toScreen(b.x, b.y), hot = hitBy[d] > 0, block = blocking.has(d);
+    hexPath(g, bx, by, 74 * s);
+    g.fillStyle = block ? "rgba(214,242,76,.045)" : hot ? "rgba(255,74,61,.05)" : "rgba(255,255,255,.018)"; g.fill();
+    g.setLineDash([4, 6]); g.lineDashOffset = RM ? 0 : -now * 0.01; g.strokeStyle = block ? rgba(K.lime, .55) : hot ? rgba(K.red, .4) : "rgba(255,255,255,.14)"; g.lineWidth = 1; g.stroke(); g.setLineDash([]);
   }
-
-  // ledger
-  const evs = a ? eventsOf(a.ip) : [], ft = stageTimes(evs), st = a ? (a.max_stage || 0) : 0, t0 = a ? tms(a.first_seen) : 0;
-  const led = $("ledger"); led.replaceChildren();
-  for (const s of STAGES) {
-    const li = el("li");
-    const reached = a && s.n <= st, cur = a && s.n === st && !a.contained_at;
-    if (reached && !cur) li.classList.add("done"); if (cur) li.classList.add("cur");
-    if (a && a.contained_at && s.n > st) li.classList.add("never");
-    const lit = ledgerFlash.get(s.n), age = performance.now() - lit;
-    if (lit && age < 1200) { li.classList.add("lit"); li.style.animationDelay = -age + "ms"; }
-    const time = !a ? "waiting" : reached ? (ft[s.n] ? fmtRel(ft[s.n] - t0) : "reached") : a.contained_at ? "never" : "—";
-    li.append(el("span", "n", s.n), el("span", "nm", s.name), el("span", "dc", `${DECOY_NAME[s.decoy]} · .${DECOY_IP[s.decoy].split(".")[3]}`), el("span", "tm", time));
-    led.append(li);
-    if (a && a.contained_at && s.n === st && st < 6) led.append(el("li", "gate", "BLOCKED HERE"));
+  map.pings = map.pings.filter((p) => now - p.t < 900);
+  for (const p of map.pings) {
+    const b = BASES[p.d], [bx, by] = toScreen(b.x, b.y), u = (now - p.t) / 900;
+    g.strokeStyle = rgba(p.col, (1 - u) * .8); g.lineWidth = 1.5; hexPath(g, bx, by, (16 + u * 40) * Math.max(.8, s)); g.stroke();
   }
-  $("hud-meta").textContent = !a ? "outer ring = first bait · centre = crown jewel" : `${a.ip} · stage ${st} of 6${a.contained_at ? " · contained" : ""}`;
+  for (const d of DECOYS) {
+    const b = BASES[d], [bx, by] = toScreen(b.x, b.y), hot = hitBy[d] > 0, block = blocking.has(d);
+    const r = 11;
+    g.fillStyle = rgba(K.bg, 1); g.strokeStyle = block ? rgba(K.lime, 1) : hot ? rgba(K.red, 1) : rgba(K.fg, .9); g.lineWidth = 1.8;
+    g.beginPath(); g.roundRect(bx - r, by - r, r * 2, r * 2, 4); g.fill(); g.stroke();
+    g.fillStyle = g.strokeStyle; g.beginPath(); g.roundRect(bx - 4, by - 4, 8, 8, 2); g.fill();
+    label(g, b.name, bx, by + r + 18, rgba(K.fg, .95), 13, 500);
+    label(g, `${b.ip} · ${block ? "BLOCKING" : hot ? "UNDER ATTACK" : "ARMED"}`, bx, by + r + 32, block ? rgba(K.lime, .9) : hot ? rgba(K.red, .9) : rgba(K.mute, .9), 10, 500);
+  }
+  // friendly site
+  { const [fx, fy] = toScreen(FRIEND.x, FRIEND.y);
+    g.fillStyle = rgba(K.lime, 1); g.beginPath(); g.arc(fx, fy, 7, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = rgba(K.lime, .35); g.beginPath(); g.arc(fx, fy, 13, 0, Math.PI * 2); g.stroke();
+    label(g, FRIEND.name, fx, fy + 30, rgba(K.fg, .85), 13, 500); label(g, "FRIENDLY · REAL SITE", fx, fy + 44, rgba(K.lime, .75), 10, 500); }
+  // crown jewel
+  { const [jx, jy] = toScreen(JEWEL.x, JEWEL.y), breached = attackers.some((a) => (a.max_stage || 0) >= 6);
+    const col = breached ? K.red : K.lime;
+    g.save(); g.translate(jx, jy); g.rotate(Math.PI / 4 + (RM ? 0 : now * 0.0004));
+    g.setLineDash([3, 3]); g.strokeStyle = rgba(col, .8); g.lineWidth = 1.5; g.strokeRect(-17, -17, 34, 34); g.setLineDash([]);
+    g.rotate(-(RM ? 0 : now * 0.0004)); g.fillStyle = rgba(col, .9); g.fillRect(-6, -6, 12, 12); g.restore();
+    label(g, JEWEL.name, jx, jy + 40, rgba(K.fg, .95), 13, 500); label(g, `${JEWEL.file} · ${breached ? "TAKEN" : "PROTECTED"}`, jx, jy + 54, rgba(col, .85), 10, 500); }
+  // Mirage station
+  { g.fillStyle = rgba(K.bg, 1); g.strokeStyle = rgba(K.lime, 1); g.lineWidth = 2;
+    g.beginPath(); g.arc(sx, sy, 12, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.beginPath(); g.arc(sx, sy, 4, 0, Math.PI * 2); g.fillStyle = rgba(K.lime, 1); g.fill();
+    g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + Math.cos(map.sweep) * 12, sy + Math.sin(map.sweep) * 12); g.stroke();
+    label(g, STATION.name, sx, sy - 22, rgba(K.lime, 1), 13, 600); label(g, `${STATION.ip} · CONTROLLER`, sx, sy + 28, rgba(K.mute, .9), 10, 500); }
 
-  // picker
-  const pk = $("picker"); pk.hidden = list.length < 2;
-  if (a && list.length > 1) $("pick-n").textContent = `${list.findIndex((x) => x.ip === a.ip) + 1}/${list.length}`;
+  // tracks
+  const hits = [];
+  for (const a of [...attackers].reverse()) {
+    const t = track(a.ip), st = a.max_stage || 0, contained = !!a.contained_at, isSel = sel && sel.ip === a.ip;
+    const target = st + 1;
+    t.pos = RM ? target : t.pos + (target - t.pos) * (1 - Math.exp(-dt * 1.5));
+    if (Math.abs(target - t.pos) < 0.002) t.pos = target;
+    const p = routeAt(t.pos, t.off), [px, py] = toScreen(p.x, p.y);
+    if (now - t.histAt > 160) { t.histAt = now; const lastH = t.hist[t.hist.length - 1]; if (!lastH || Math.hypot(lastH.x - p.x, lastH.y - p.y) > 2) { t.hist.push({ x: p.x, y: p.y }); if (t.hist.length > 46) t.hist.shift(); } }
+    if (swept(p.x, p.y)) t.sweptAt = now;
+    const glow = layers.sweep && !RM ? .5 + .5 * Math.exp(-(now - t.sweptAt) / 1900) : 1;
+    const col = contained ? K.lime : bandOf(a) === "tarpit" ? K.amber : K.red;
 
-  // identity + stamp
-  $("int-ip").textContent = a ? a.ip : "—.—.—.—";
-  const stamp = $("stamp"), slam = stamp.classList.contains("slam");
-  stamp.className = "stamp " + band + (slam ? " slam" : "");
-  stamp.textContent = !a ? "No contact" : a.contained_at ? "Contained" : band === "tarpit" ? "Slowing down" : "Watching";
-  $("int-seen").textContent = a ? `First seen ${fmtTime(a.first_seen)} · ${a.playbook || "watch"} playbook` : "Waiting for first contact";
-  riskShown.target = a ? (a.risk_score || 0) : 0; riskShown.painted = false;
-  $("risk-word").textContent = BAND_WORD[band];
-  $("risk-word").style.color = band === "contain" ? "var(--green)" : band === "tarpit" ? "var(--amber)" : band === "watch" ? "var(--hud)" : "";
+    // route already flown, then the projected course still ahead
+    if (layers.route) {
+      g.lineWidth = isSel ? 2.2 : 1.4; g.strokeStyle = rgba(K.red, isSel ? .85 : .45);
+      g.beginPath(); let first = true;
+      for (let f = 0; f <= t.pos + 1e-6; f += 0.05) { const q = routeAt(Math.min(f, t.pos), t.off), [qx, qy] = toScreen(q.x, q.y); if (first) { g.moveTo(qx, qy); first = false; } else g.lineTo(qx, qy); }
+      g.lineTo(px, py); g.stroke();
+      if (!RM) { g.setLineDash([2, 14]); g.lineDashOffset = -now * 0.05; g.strokeStyle = rgba(K.fg, isSel ? .9 : .4); g.lineWidth = 2.2; g.stroke(); g.setLineDash([]); }
+      if (!contained && t.pos < ROUTE.length - 1) {
+        g.setLineDash([5, 7]); g.strokeStyle = rgba(K.red, isSel ? .35 : .15); g.lineWidth = 1.2; g.beginPath(); g.moveTo(px, py);
+        for (let i = Math.ceil(t.pos + 1e-3); i < ROUTE.length; i++) { const q = routeAt(i, t.off), [qx, qy] = toScreen(q.x, q.y); g.lineTo(qx, qy); }
+        g.stroke(); g.setLineDash([]);
+      }
+      // waypoints reached
+      for (let i = 2; i <= Math.floor(t.pos + 1e-3); i++) {
+        const q = routeAt(i, t.off), [qx, qy] = toScreen(q.x, q.y);
+        g.fillStyle = rgba(K.bg, 1); g.strokeStyle = rgba(K.red, .9); g.lineWidth = 1.5; g.beginPath(); g.arc(qx, qy, 4.5, 0, Math.PI * 2); g.fill(); g.stroke();
+        if (isSel) label(g, `S${i - 1}`, qx + 9, qy - 7, rgba(K.red, .9), 10, 600, "left");
+      }
+      if (t.flareAt && now - t.flareAt < 1400) {
+        const u = (now - t.flareAt) / 1400, q = routeAt(target, t.off), [qx, qy] = toScreen(q.x, q.y);
+        g.strokeStyle = rgba(K.red, 1 - u); g.lineWidth = 2; g.beginPath(); g.arc(qx, qy, 6 + u * 46, 0, Math.PI * 2); g.stroke();
+        g.beginPath(); g.arc(qx, qy, 6 + easeOut(u) * 24, 0, Math.PI * 2); g.stroke();
+      }
+    }
+    // history dots, evenly spaced in time: gaps show speed
+    if (layers.history) {
+      t.hist.forEach((h, i) => { const [hx, hy] = toScreen(h.x, h.y), u = i / t.hist.length; g.fillStyle = rgba(col, u * .7 * glow); g.beginPath(); g.arc(hx, hy, 1.4 + u * 1.4, 0, Math.PI * 2); g.fill(); });
+    }
+    // interceptor: fired from the station, curving onto the track, then a shield
+    const mAge = t.missileAt ? now - t.missileAt : -1, flight = 1100;
+    if (contained && mAge >= 0 && mAge < flight && !RM) {
+      const u = easeOut(mAge / flight), cx = (sx + px) / 2 + (py - sy) * .35, cy = (sy + py) / 2 - (px - sx) * .35;
+      const at = (v) => [(1 - v) * (1 - v) * sx + 2 * (1 - v) * v * cx + v * v * px, (1 - v) * (1 - v) * sy + 2 * (1 - v) * v * cy + v * v * py];
+      g.strokeStyle = rgba(K.lime, .9); g.lineWidth = 2; g.beginPath();
+      for (let v = Math.max(0, u - .35); v <= u; v += 0.02) { const [mx, my] = at(v); v === Math.max(0, u - .35) ? g.moveTo(mx, my) : g.lineTo(mx, my); }
+      g.stroke(); const [mx, my] = at(u);
+      g.fillStyle = "#fff"; g.beginPath(); g.arc(mx, my, 3.5, 0, Math.PI * 2); g.fill();
+      g.fillStyle = rgba(K.lime, .3); g.beginPath(); g.arc(mx, my, 10, 0, Math.PI * 2); g.fill();
+    }
+    const impact = contained ? mAge - flight : -1;
+    if (impact >= 0 && impact < 1200 && !RM) {
+      const u = impact / 1200;
+      g.fillStyle = rgba(K.lime, (1 - u) * .35); g.beginPath(); g.arc(px, py, 10 + u * 70, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = rgba(K.lime, 1 - u); g.lineWidth = 2; g.beginPath(); g.arc(px, py, 10 + easeOut(u) * 50, 0, Math.PI * 2); g.stroke();
+    }
+    const shieldOn = contained && (RM || mAge >= flight || t.missileAt < 0);
+    if (shieldOn) {
+      g.strokeStyle = rgba(K.lime, .9); g.lineWidth = 1.8; g.setLineDash([6, 4]); g.lineDashOffset = RM ? 0 : now * 0.02;
+      g.beginPath(); g.arc(px, py, 22, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+    }
+    // speed vector toward the next bait
+    if (!contained && t.pos < ROUTE.length - 1) {
+      const nx = routeAt(Math.min(ROUTE.length - 1, Math.floor(t.pos + 1e-3) + 1), t.off), ang = Math.atan2(nx.y - p.y, nx.x - p.x);
+      g.strokeStyle = rgba(col, glow); g.lineWidth = 1.6; g.beginPath(); g.moveTo(px + Math.cos(ang) * 10, py + Math.sin(ang) * 10); g.lineTo(px + Math.cos(ang) * 34, py + Math.sin(ang) * 34); g.stroke();
+    }
+    // the hostile symbol: a diamond
+    const R = isSel ? 9 : 7;
+    if (!contained) { g.fillStyle = rgba(col, .18 * glow); g.beginPath(); g.arc(px, py, 22, 0, Math.PI * 2); g.fill(); }
+    g.save(); g.translate(px, py); g.rotate(Math.PI / 4);
+    g.fillStyle = contained ? rgba(K.bg, 1) : rgba(col, glow); g.strokeStyle = rgba(col, 1); g.lineWidth = 2;
+    g.fillRect(-R, -R, R * 2, R * 2); g.strokeRect(-R, -R, R * 2, R * 2); g.restore();
+    if (contained) { g.strokeStyle = rgba(K.red, .9); g.lineWidth = 2; g.beginPath(); g.moveTo(px - 5, py - 5); g.lineTo(px + 5, py + 5); g.moveTo(px + 5, py - 5); g.lineTo(px - 5, py + 5); g.stroke(); }
+    // lock-on brackets close in on the selected track
+    if (isSel) {
+      const u = RM ? 1 : easeOut((now - t.lockAt) / 500), rr = lerp(46, 20, u), L = 7;
+      g.strokeStyle = rgba(contained ? K.lime : K.fg, .95); g.lineWidth = 1.8; g.beginPath();
+      for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.moveTo(px + dx * rr, py + dy * (rr - L)); g.lineTo(px + dx * rr, py + dy * rr); g.lineTo(px + dx * (rr - L), py + dy * rr); }
+      g.stroke();
+    }
+    // data block with a leader line
+    const right = px < W - 210, bx = px + (right ? 34 : -34), by = py - 42, bw = 156, bh = 54, x0 = right ? bx : bx - bw;
+    g.strokeStyle = rgba(col, .7); g.lineWidth = 1; g.beginPath(); g.moveTo(px + (right ? 12 : -12), py - 10); g.lineTo(right ? x0 : x0 + bw, by + bh - 6); g.stroke();
+    g.fillStyle = "rgba(10,11,10,.88)"; g.beginPath(); g.roundRect(x0, by, bw, bh, 8); g.fill();
+    g.fillStyle = rgba(col, 1); g.fillRect(x0, by + 8, 2, bh - 16);
+    label(g, trackId(a.ip), x0 + 12, by + 17, rgba(K.fg, 1), 13, 600, "left");
+    label(g, contained ? "INTERCEPTED" : bandOf(a) === "tarpit" ? "HOSTILE · SLOWED" : "HOSTILE", x0 + 52, by + 17, rgba(col, 1), 10, 600, "left");
+    label(g, a.ip, x0 + 12, by + 32, rgba(K.mute, 1), 10, 500, "left");
+    label(g, `STAGE ${st}/6 · RISK ${a.risk_score || 0}`, x0 + 12, by + 46, rgba(K.fg, .85), 10, 500, "left");
+    hits.push({ kind: "track", ip: a.ip, x: px, y: py, r: 18 });
+  }
+  map.hitTracks = hits;
+  $("map-empty").hidden = attackers.length > 0;
+}
+function mapHit(mx, my) {
+  for (const h of map.hitTracks || []) if (Math.hypot(h.x - mx, h.y - my) < h.r) return h;
+  const near = (p) => { const [x, y] = toScreen(p.x, p.y); return Math.hypot(x - mx, y - my) < 22; };
+  for (const d of DECOYS) if (near(BASES[d])) return { kind: "base", d };
+  if (near(STATION)) return { kind: "station" };
+  if (near(JEWEL)) return { kind: "jewel" };
+  if (near(FRIEND)) return { kind: "friend" };
+  return null;
+}
+function showHover(h, mx, my) {
+  const card = $("hovercard");
+  if (!h) { card.hidden = true; map.cv.classList.remove("over"); return; }
+  map.cv.classList.add("over");
+  const key = JSON.stringify(h);
+  if (card.dataset.key !== key || card.hidden) {
+    card.dataset.key = key; card.replaceChildren(); card.className = "hovercard";
+    const rows = [];
+    let k = "", title = "", act = "";
+    if (h.kind === "track") {
+      const a = state.attackers.get(h.ip); if (!a) { card.hidden = true; return; }
+      card.classList.add("hostile");
+      k = a.contained_at ? "Intercepted track" : "Hostile track"; title = `${trackId(a.ip)} · ${a.ip}`;
+      rows.push(["Now at", PLACE[(a.max_stage || 0) + 1]], ["Baits taken", `${a.max_stage || 0} of 6`], ["Threat score", `${a.risk_score || 0} / 100`], ["First contact", fmtClock(a.first_seen)], ["Events", a.event_count || 0]);
+      act = state.selected === a.ip ? "Locked · click a base or empty space to keep it" : "Click to lock this track";
+    } else if (h.kind === "base") {
+      const b = BASES[h.d], src = Object.keys(DECOY_OF_SOURCE).find((s) => DECOY_OF_SOURCE[s] === h.d);
+      const evs = state.events.filter((e) => e.source === src), lastE = evs[evs.length - 1];
+      k = `${b.role} · decoy`; title = b.name;
+      rows.push(["Address", b.ip], ["Holds baits", b.holds], ["Hostile events", evs.length], ["Last contact", lastE ? fmtClock(lastE.ts) : "none"]);
+      act = "Click to zoom to this base";
+    } else if (h.kind === "station") { k = "Mirage"; title = "Radar station"; rows.push(["Address", STATION.ip], ["Watches", "3 decoy bases"], ["Auto-intercept", "at threat 75"]); act = "Fires the interceptor when a track crosses 75"; }
+    else if (h.kind === "jewel") { k = "Protected objective"; title = "Crown jewel"; rows.push(["File", JEWEL.file], ["Lives on", "S3 bucket"], ["Status", ranked().some((a) => (a.max_stage || 0) >= 6) ? "Taken" : "Protected"]); }
+    else { k = "Friendly"; title = "Staff portal"; rows.push(["Address", FRIEND.ip], ["What it is", "The real intranet"], ["Decoys touched", "none, ever"]); act = "Normal users only ever land here"; }
+    card.append(el("span", "k", k), el("h3", null, title));
+    const dl = el("dl"); for (const [dt, dd] of rows) dl.append(el("dt", null, dt), el("dd", null, dd)); card.append(dl);
+    if (act) card.append(el("div", "act", act));
+    card.hidden = false;
+  }
+  const w = card.offsetWidth, hh = card.offsetHeight;
+  card.style.left = clamp(mx + 18, 8, map.W - w - 8) + "px";
+  card.style.top = clamp(my + 18 + hh > map.H ? my - hh - 14 : my + 18, 8, map.H - hh - 8) + "px";
+}
+function selectTrack(ip, fly) {
+  if (!ip) return;
+  state.selected = ip; track(ip).lockAt = performance.now();
+  if (fly) { const t = track(ip), p = routeAt(t.pos, t.off); map.tgt.x = p.x; map.tgt.y = p.y; map.tgt.z = Math.max(map.tgt.z, 1.5); }
+  dirty.model = dirty.charts = dirty.queue = true;
+}
+function zoomBy(f, ax, ay) {
+  const z = clamp(map.tgt.z * f, 0.7, 3.2);
+  if (ax != null) { const [wx, wy] = toWorld(ax, ay); const k = 1 - map.tgt.z / z; map.tgt.x += (wx - map.tgt.x) * k; map.tgt.y += (wy - map.tgt.y) * k; }
+  map.tgt.z = z;
+}
+function resetView() { map.tgt = { x: 500, y: 320, z: 1 }; setFollow(false); }
+function setFollow(on) { map.follow = on; $("follow").setAttribute("aria-pressed", on); }
+function bindMap() {
+  const cv = $("map");
+  cv.addEventListener("pointerdown", (e) => { cv.setPointerCapture(e.pointerId); map.drag = { x: e.offsetX, y: e.offsetY, cx: map.tgt.x, cy: map.tgt.y, moved: false }; });
+  cv.addEventListener("pointermove", (e) => {
+    const mx = e.offsetX, my = e.offsetY; map.mouse = [mx, my];
+    if (map.drag) {
+      const dx = mx - map.drag.x, dy = my - map.drag.y;
+      if (Math.hypot(dx, dy) > 4) { map.drag.moved = true; cv.classList.add("drag"); setFollow(false); }
+      if (map.drag.moved) { const s = scale(); map.tgt.x = map.cam.x = map.drag.cx - dx / s; map.tgt.y = map.cam.y = map.drag.cy - dy / s; }
+    }
+    const [wx, wy] = toWorld(mx, my);
+    $("grid-ref").textContent = wx >= 0 && wx < 1000 && wy >= 0 && wy < 640 ? `GRID ${String.fromCharCode(65 + Math.floor(wx / 50))}${Math.floor(wy / 50) + 1} · ${Math.round(wx)}, ${Math.round(wy)}` : "OUTSIDE THE LAB";
+    if (!map.drag || !map.drag.moved) showHover(mapHit(mx, my), mx, my); else showHover(null);
+  });
+  cv.addEventListener("pointerup", (e) => {
+    const d = map.drag; map.drag = null; cv.classList.remove("drag");
+    if (d && !d.moved) {
+      const h = mapHit(e.offsetX, e.offsetY);
+      if (h && h.kind === "track") selectTrack(h.ip, false);
+      else if (h && h.kind === "base") { const b = BASES[h.d]; setFollow(false); map.tgt.x = b.x; map.tgt.y = b.y; map.tgt.z = 2; showHover(null); return; }
+      showHover(h, e.offsetX, e.offsetY);
+    }
+  });
+  cv.addEventListener("pointerleave", () => { showHover(null); $("grid-ref").textContent = "GRID —"; });
+  // plain scroll keeps moving the page; Ctrl (or ⌘) + scroll zooms the map, like an embedded map
+  let hintTimer = 0;
+  cv.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey && !e.metaKey) {
+      const h = $("zoom-hint"); h.hidden = false; h.classList.remove("show"); void h.offsetWidth; h.classList.add("show");
+      clearTimeout(hintTimer); hintTimer = setTimeout(() => { h.hidden = true; }, 1400);
+      return;
+    }
+    e.preventDefault(); setFollow(false); zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.offsetX, e.offsetY);
+  }, { passive: false });
+  $("zoom-in").onclick = () => zoomBy(1.3);
+  $("zoom-out").onclick = () => zoomBy(1 / 1.3);
+  $("recenter").onclick = resetView;
+  $("follow").onclick = () => { const on = !map.follow; setFollow(on); if (on) { const a = current(); if (a) selectTrack(a.ip, false); map.tgt.z = Math.max(map.tgt.z, 1.6); } };
+  document.querySelectorAll("[data-layer]").forEach((b) => b.addEventListener("click", () => {
+    const k = b.dataset.layer; layers[k] = !layers[k]; b.classList.toggle("on", layers[k]); b.setAttribute("aria-pressed", layers[k]);
+  }));
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("input, textarea") || e.metaKey || e.ctrlKey) return;
+    if (e.key === "+" || e.key === "=") zoomBy(1.3); else if (e.key === "-") zoomBy(1 / 1.3);
+    else if (e.key === "0") resetView(); else if (e.key === "f" || e.key === "F") $("follow").click();
+    else if (e.key === "Escape") { showHover(null); setFollow(false); }
+  });
+}
 
-  // facts
-  const ttc = a && a.contained_at ? tms(a.contained_at) - t0 : null;
-  $("f-ttd").textContent = fmtDur(detectLag(a));
-  $("f-ttc").textContent = ttc != null ? fmtDur(ttc) : a ? "not yet" : "—";
-  $("f-ttc").classList.toggle("hot", ttc != null);
-  $("f-events").textContent = a ? (a.event_count || evs.length) : 0;
-  const ft2 = $("f-tokens"); ft2.replaceChildren(String(a ? (a.tokens || []).length : 0), el("small", null, "/6"));
-
-  const blocked = blockedDecoys(a);
-  for (const d of DECOYS) $("enf-" + d).classList.toggle("on", blocked.has(d));
+// ------------------------------------------------------------------ target lock + track table
+function buildDial() {
+  const svg = $("dial-svg");
+  S("circle", { cx: 100, cy: 100, r: 70, class: "dial-ring" }, svg);
+  for (let i = 0; i < 60; i++) {
+    const a = (i / 60) * Math.PI * 2 - Math.PI / 2, r1 = 82, r2 = i % 5 ? 92 : 96;
+    const l = S("line", { x1: 100 + Math.cos(a) * r1, y1: 100 + Math.sin(a) * r1, x2: 100 + Math.cos(a) * r2, y2: 100 + Math.sin(a) * r2 }, svg);
+    l.classList.add(i < 24 ? "w" : i < 45 ? "t" : "c");
+  }
+}
+let dialShown = -1;
+function renderLock() {
+  const a = current(), band = bandOf(a);
+  document.body.dataset.state = band;
+  const risk = a ? a.risk_score || 0 : 0;
+  if (risk !== dialShown) {
+    const lines = $("dial-svg").querySelectorAll("line"), lit = Math.round(risk / 100 * 60);
+    lines.forEach((l, i) => { l.style.transitionDelay = (RM ? 0 : Math.abs(i - (dialShown < 0 ? 0 : Math.round(dialShown / 100 * 60))) * 9) + "ms"; l.classList.toggle("on", i < lit); });
+    countTo("dial-n", risk); dialShown = risk;
+  }
+  $("dial").classList.toggle("safe", !!(a && a.contained_at));
+  const badge = $("lock-badge"), text = !a ? "Standby" : a.contained_at ? "Intercepted" : band === "tarpit" ? "Slowed" : "Hostile";
+  if (badge.textContent !== text) { badge.textContent = text; badge.className = "badge " + (!a ? "" : a.contained_at ? "contained" : band === "tarpit" ? "tarpit" : "hostile"); if (state.booted) badge.classList.add("flip"); }
+  $("lock-sub").textContent = a ? `${trackId(a.ip)} · ${state.selected ? "locked by you" : "highest threat, auto-locked"}` : "No track locked";
+  const st = a ? a.max_stage || 0 : 0;
+  $("lf-id").textContent = a ? trackId(a.ip) : "—";
+  $("lf-ip").textContent = a ? a.ip : "—";
+  const pos = $("lf-pos"); pos.textContent = a ? PLACE[st + 1].replace(/^the /, "").replace(/^./, (c) => c.toUpperCase()) : "—";
+  const head = $("lf-head");
+  head.textContent = !a ? "—" : a.contained_at ? "None · blocked" : st >= 6 ? "All baits taken" : STAGES[st].name;
+  head.className = a && a.contained_at ? "ok" : a ? "hot" : "";
+  $("lf-bait").textContent = a ? `${st} of 6` : "—";
   $("btn-contain").disabled = !a || !!a.contained_at;
   $("btn-release").disabled = !a || !a.contained_at;
+
+  // track table
+  const host = $("tracks"), list = ranked(); host.replaceChildren();
+  for (const x of list) {
+    const b = el("button", "trk" + (x.contained_at ? " done" : "") + (bandOf(x) === "tarpit" ? " tarpit" : "") + (a && a.ip === x.ip ? " sel" : ""));
+    b.type = "button"; b.setAttribute("role", "listitem");
+    const id = el("span", "id", trackId(x.ip)); id.append(el("span", null, x.ip));
+    const bar = el("span", "bar"); for (let i = 1; i <= 6; i++) bar.append(el("i", i <= (x.max_stage || 0) ? "on" : null));
+    b.append(el("span", "sym"), id, el("span", "st", x.contained_at ? "intercepted" : bandOf(x) === "tarpit" ? "slowed" : `risk ${x.risk_score || 0}`), bar);
+    b.addEventListener("click", () => selectTrack(x.ip, true));
+    host.append(b);
+  }
+  $("tracks-empty").hidden = list.length > 0;
+  $("tracks-sub").textContent = `${list.length} track${list.length === 1 ? "" : "s"} · ${list.filter((x) => !x.contained_at).length} active`;
 }
-function renderRisk() {
-  const tgt = riskShown.target || 0;
-  if (riskShown.v === tgt && riskShown.painted) return;
-  const v = RM || Math.abs(tgt - riskShown.v) < 0.5 ? tgt : riskShown.v + (tgt - riskShown.v) * 0.12;
-  riskShown.v = v; riskShown.painted = v === tgt;
-  const r = Math.round(v);
-  $("risk-n").textContent = r;
-  $("risk-n").style.color = r >= 75 ? "var(--red)" : r >= 40 ? "var(--amber)" : r > 0 ? "var(--hud)" : "";
-  const segs = $("risk-segs").children;
-  for (let i = 0; i < 20; i++) segs[i].classList.toggle("on", r > i * 5);
-}
-
-// ------------------------------------------------------------------ 2 · HUD canvas
-const hud = { cv: null, g: null, W: 0, H: 0, cx: 0, cy: 0, R: 100, blips: new Map(), last: 0 };
-const RING = [0.965, 0.855, 0.735, 0.615, 0.495, 0.375, 0.255];   // stage 0 (perimeter) .. 6
-const CORE = 0.13;
-const ringR = (k) => hud.R * RING[clamp(k, 0, 6)];
-function hashUnit(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
-/** Each intruder enters from the left or right flank and spirals inward a little per stage. */
-function hudBlip(ip) {
-  let b = hud.blips.get(ip);
-  if (!b) {
-    const u = hashUnit(ip), deg = u < 0.5 ? 150 + u * 2 * 40 : 330 + (u - 0.5) * 2 * 40;
-    b = { base: deg * Math.PI / 180, r: null, ang: null, pulses: [], ringAt: {}, shieldAt: 0 };
-    hud.blips.set(ip, b);
-  }
-  return b;
-}
-const STEP_ANG = 0.21;
-function hudPulse(ip, col, now) { if (RM || !ip) return; const b = hudBlip(ip); b.pulses.push({ born: now, col }); if (b.pulses.length > 8) b.pulses.shift(); }
-function sizeHud() {
-  const wrap = $("hud-wrap"), cv = $("hud"), dpr = Math.min(devicePixelRatio || 1, 2);
-  hud.cv = cv; hud.g = cv.getContext("2d");
-  hud.W = wrap.clientWidth; hud.H = wrap.clientHeight;
-  cv.width = Math.round(hud.W * dpr); cv.height = Math.round(hud.H * dpr);
-  hud.g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  hud.cx = hud.W / 2; hud.cy = hud.H / 2; hud.R = Math.max(60, Math.min(hud.W, hud.H) / 2 - 10);
-}
-function polar(ang, r) { return [hud.cx + Math.cos(ang) * r, hud.cy + Math.sin(ang) * r]; }
-function textBox(g, text, x, y, col, align, size, font) {
-  g.font = `${font || "600"} ${size}px ${FONT_MONO}`;
-  const w = g.measureText(text).width;
-  const x0 = clamp(align === "center" ? x - w / 2 : align === "right" ? x - w : x, 6, hud.W - w - 6);   // never off the canvas
-  g.fillStyle = "rgba(4,7,11,.82)"; g.fillRect(x0 - 4, y - size * 0.75, w + 8, size * 1.35);
-  g.fillStyle = col; g.textAlign = "left"; g.textBaseline = "alphabetic"; g.fillText(text, x0, y + size * 0.3);
-}
-function drawHud(now) {
-  const g = hud.g; if (!g) return;
-  const dt = hud.last ? Math.min(0.1, (now - hud.last) / 1000) : 0; hud.last = now;
-  const { W, H, cx, cy, R } = hud, sel = current();
-  const selStage = sel ? (sel.max_stage || 0) : -1;
-  g.clearRect(0, 0, W, H);
-  const fs = clamp(R * 0.04, 10, 13);
-
-  // glow
-  let gr = g.createRadialGradient(cx, cy, 0, cx, cy, R);
-  gr.addColorStop(0, "rgba(90,215,240,.10)"); gr.addColorStop(0.6, "rgba(90,215,240,.03)"); gr.addColorStop(1, "rgba(90,215,240,0)");
-  g.fillStyle = gr; g.fillRect(0, 0, W, H);
-
-  // decoy bands: rings 1-2 live on the admin panel, 3-4 on SSH, 5-6 on S3
-  const mid = (a, b) => (ringR(a) + ringR(b)) / 2;
-  const bands = [["admin", mid(0, 1), mid(2, 3)], ["ssh", mid(2, 3), mid(4, 5)], ["s3", mid(4, 5), (ringR(6) + R * CORE) / 2]];
-  for (const [d, ro, ri] of bands) {
-    g.beginPath(); g.arc(cx, cy, ro, 0, Math.PI * 2); g.arc(cx, cy, ri, 0, Math.PI * 2, true);
-    g.fillStyle = rgba(C[d], 0.035); g.fill();
-    g.strokeStyle = rgba(C[d], 0.12); g.lineWidth = 1; g.beginPath(); g.arc(cx, cy, ro, 0, Math.PI * 2); g.stroke();
-  }
-
-  // crosshair with ticks
-  g.strokeStyle = rgba(C.edgeHi, 0.55); g.lineWidth = 1;
-  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
-
-  // perimeter: slowly turning tick ring
-  const rot = RM ? 0 : now * 0.00004;
-  const pr = ringR(0);
-  for (let i = 0; i < 120; i++) {
-    const a = rot + i * Math.PI / 60, long = i % 10 === 0, r1 = pr - (long ? 9 : 4);
-    g.strokeStyle = rgba(C.hud, long ? 0.6 : 0.22); g.lineWidth = long ? 1.4 : 1;
-    g.beginPath(); g.moveTo(...polar(a, r1)); g.lineTo(...polar(a, pr)); g.stroke();
-  }
-  g.strokeStyle = rgba(C.hud, 0.35); g.setLineDash([2, 7]); g.lineDashOffset = RM ? 0 : -now * 0.004;
-  g.beginPath(); g.arc(cx, cy, pr + 6, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
-
-  // radar sweep, clipped to the perimeter
-  if (!RM && g.createConicGradient) {
-    const sa = (now * 0.0009) % (Math.PI * 2);
-    const cg = g.createConicGradient(sa - 0.9, cx, cy);
-    cg.addColorStop(0, "rgba(90,215,240,0)"); cg.addColorStop(0.14, "rgba(90,215,240,.10)"); cg.addColorStop(0.1433, "rgba(90,215,240,.35)"); cg.addColorStop(0.145, "rgba(90,215,240,0)"); cg.addColorStop(1, "rgba(90,215,240,0)");
-    g.fillStyle = cg; g.beginPath(); g.arc(cx, cy, pr - 10, 0, Math.PI * 2); g.fill();
-  }
-
-  // stage rings for the selected intruder: amber = walked, red = where they are now
-  const pulse = RM ? 1 : 0.6 + 0.4 * Math.sin(now / 280);
-  for (let k = 1; k <= 6; k++) {
-    const r = ringR(k), reached = k <= selStage, cur = k === selStage && sel && !sel.contained_at;
-    const b = sel ? hud.blips.get(sel.ip) : null, at = b && b.ringAt[k];
-    const drawing = at && now - at < 1000 && !RM;
-    g.lineWidth = cur ? 2.5 : reached ? 1.6 : 1;
-    g.strokeStyle = cur ? rgba(C.red, 0.55 + 0.45 * pulse) : reached && !drawing ? rgba(C.amber, 0.75) : rgba(C.edgeHi, 0.9);
-    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
-    if (drawing && now >= at) {
-      const p = easeOut((now - at) / 900), a0 = -Math.PI / 2;
-      g.strokeStyle = rgba(C.amber, 1); g.lineWidth = 3; g.shadowColor = rgba(C.amber, 0.9); g.shadowBlur = 14;
-      g.beginPath(); g.arc(cx, cy, r, a0, a0 + p * Math.PI * 2); g.stroke(); g.shadowBlur = 0;
-      const [hx, hy] = polar(a0 + p * Math.PI * 2, r); g.fillStyle = "#fff"; g.beginPath(); g.arc(hx, hy, 3, 0, Math.PI * 2); g.fill();
-    }
-  }
-
-  // crown jewel
-  const jr = R * CORE * 0.62, breached = [...state.attackers.values()].some((x) => (x.max_stage || 0) >= 6);
-  g.save(); g.translate(cx, cy); g.rotate(Math.PI / 4);
-  g.fillStyle = breached ? rgba(C.red, 0.25 + 0.2 * pulse) : rgba(C.hud, 0.08); g.fillRect(-jr, -jr, jr * 2, jr * 2);
-  g.strokeStyle = breached ? rgba(C.red, 1) : rgba(C.hud, 0.8); g.lineWidth = 1.5; g.strokeRect(-jr, -jr, jr * 2, jr * 2);
-  g.strokeStyle = rgba(C.hud, 0.35); g.strokeRect(-jr * 0.55, -jr * 0.55, jr * 1.1, jr * 1.1);
-  g.restore();
-  g.textAlign = "center"; g.font = `600 ${fs - 1}px ${FONT_MONO}`; g.fillStyle = breached ? rgba(C.red, 1) : rgba(C.fg, 0.85);
-  g.fillText("CROWN JEWEL", cx, cy + R * CORE + fs + 4);
-
-  // paths, shields, blips
-  const ips = ranked().map((x) => x.ip);
-  for (const ip of [...ips].reverse()) {
-    const a = state.attackers.get(ip), b = hudBlip(ip), isSel = sel && sel.ip === ip;
-    const st = a.max_stage || 0, contained = !!a.contained_at;
-    const tAng = b.base + st * STEP_ANG, tR = ringR(st);
-    if (b.r == null || RM) { b.r = tR; b.ang = tAng; }
-    const kk = 1 - Math.exp(-dt * 3.2); b.r += (tR - b.r) * kk; b.ang += (tAng - b.ang) * kk;
-    const alpha = isSel ? 1 : 0.45;
-
-    // walked path: a spiral through every stage reached so far
-    g.strokeStyle = rgba(C.amber, 0.65 * alpha); g.lineWidth = isSel ? 2 : 1.2; g.setLineDash([5, 5]); g.lineDashOffset = RM ? 0 : -now * 0.01;
-    g.beginPath();
-    let first = true;
-    for (let s = 0; s < st; s++) {
-      for (let i = 0; i <= 14; i++) {
-        const u = i / 14, ang = b.base + (s + u) * STEP_ANG, r = ringR(s) + (ringR(s + 1) - ringR(s)) * u;
-        const [x, y] = polar(ang, r);
-        if (r < b.r - 0.5) break;
-        if (first) { g.moveTo(x, y); first = false; } else g.lineTo(x, y);
-      }
-    }
-    if (!first) { g.lineTo(...polar(b.ang, b.r)); g.stroke(); }
-    g.setLineDash([]);
-    for (let s = 1; s <= st; s++) {
-      const [x, y] = polar(b.base + s * STEP_ANG, ringR(s));
-      if (ringR(s) < b.r - 0.5) continue;
-      g.fillStyle = rgba(C.amber, alpha); g.save(); g.translate(x, y); g.rotate(Math.PI / 4); g.fillRect(-3, -3, 6, 6); g.restore();
-    }
-
-    // shield: a green ring closing just inside the intruder, between them and the next bait
-    if (contained) {
-      const sr = st >= 6 ? R * CORE * 1.15 : (ringR(st) + ringR(st + 1)) / 2;
-      const p = RM || !b.shieldAt ? 1 : easeOut((now - b.shieldAt) / 1100);
-      g.strokeStyle = rgba(C.green, 0.95 * alpha); g.lineWidth = isSel ? 4 : 2; g.shadowColor = rgba(C.green, 0.8); g.shadowBlur = isSel ? 16 : 6;
-      g.beginPath(); g.arc(cx, cy, sr, b.ang - p * Math.PI, b.ang + p * Math.PI); g.stroke(); g.shadowBlur = 0;
-      if (p >= 1) {
-        g.strokeStyle = rgba(C.green, 0.4 * alpha); g.lineWidth = 1; g.setLineDash([3, 6]); g.lineDashOffset = RM ? 0 : now * 0.008;
-        g.beginPath(); g.arc(cx, cy, sr - 7, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
-      }
-      if (isSel && p > 0.6) {
-        const [lx, ly] = polar(b.ang + Math.PI, sr);
-        textBox(g, "SHIELD UP", lx, ly, rgba(C.green, clamp((p - 0.6) * 2.5)), "center", fs);
-      }
-    }
-
-    // event pulses
-    const [bx, by] = polar(b.ang, b.r);
-    b.pulses = b.pulses.filter((q) => now - q.born < 1000);
-    for (const q of b.pulses) { const t = (now - q.born) / 1000; g.strokeStyle = rgba(q.col, (1 - t) * 0.9 * alpha); g.lineWidth = 2; g.beginPath(); g.arc(bx, by, 8 + t * 34, 0, Math.PI * 2); g.stroke(); }
-
-    // tarpit halo
-    if (!contained && bandOf(a) === "tarpit") {
-      g.strokeStyle = rgba(C.amber, 0.85 * alpha); g.lineWidth = 1.5; g.setLineDash([4, 4]); g.lineDashOffset = RM ? 0 : now * 0.02;
-      g.beginPath(); g.arc(bx, by, 17, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
-    }
-
-    // the blip itself
-    if (contained) {
-      g.fillStyle = rgba(C.bg, 1); g.strokeStyle = rgba(C.red, 0.9 * alpha); g.lineWidth = 2;
-      g.beginPath(); g.arc(bx, by, isSel ? 8 : 6, 0, Math.PI * 2); g.fill(); g.stroke();
-      g.strokeStyle = rgba(C.red, alpha); g.beginPath(); g.moveTo(bx - 4, by - 4); g.lineTo(bx + 4, by + 4); g.moveTo(bx + 4, by - 4); g.lineTo(bx - 4, by + 4); g.stroke();
-    } else {
-      gr = g.createRadialGradient(bx, by, 0, bx, by, 26); gr.addColorStop(0, rgba(C.red, 0.55 * alpha)); gr.addColorStop(1, rgba(C.red, 0));
-      g.fillStyle = gr; g.beginPath(); g.arc(bx, by, 26, 0, Math.PI * 2); g.fill();
-      g.fillStyle = rgba(C.red, alpha); g.beginPath(); g.arc(bx, by, isSel ? 7 : 5, 0, Math.PI * 2); g.fill();
-      g.fillStyle = "#fff"; g.beginPath(); g.arc(bx, by, 2.2, 0, Math.PI * 2); g.fill();
-    }
-    // label on the outside of the blip, with a leader line
-    const out = polar(b.ang, b.r + 26), right = Math.cos(b.ang) >= 0;
-    g.strokeStyle = rgba(C.red, 0.6 * alpha); g.lineWidth = 1; g.beginPath(); g.moveTo(...polar(b.ang, b.r + 10)); g.lineTo(...out); g.lineTo(out[0] + (right ? 12 : -12), out[1]); g.stroke();
-    textBox(g, ip, out[0] + (right ? 16 : -16), out[1], rgba(contained ? C.dim : C.red, alpha), right ? "left" : "right", fs + 1);
-  }
-
-  // ring labels along the top, decoy band labels along the bottom
-  for (let k = 1; k <= 6; k++) {
-    const reached = k <= selStage;
-    textBox(g, `${k} ${STAGES[k - 1].short}`, cx, cy - ringR(k) + 1, reached ? rgba(C.amber, 1) : rgba(C.dim, 0.8), "center", fs - 1, reached ? "600" : "500");
-  }
-  for (const [d, ro, ri] of bands) textBox(g, `${DECOY_NAME[d].toUpperCase()} .${DECOY_IP[d].split(".")[3]}`, cx, cy + (ro + ri) / 2 + 2, rgba(C[d], 0.85), "center", fs - 1, "500");
-  textBox(g, "PERIMETER", cx, cy + ringR(0) - 14, rgba(C.hud, 0.7), "center", fs - 1, "500");
+function tickLockClock() {
+  const a = current(), n = $("lf-time");
+  if (!a) { n.textContent = "—"; return; }
+  const end = a.contained_at ? tms(a.contained_at) : Date.now();
+  n.textContent = fmtDur(end - tms(a.first_seen));
 }
 
-// ------------------------------------------------------------------ 3 · campaign replay
-const rp = { cv: null, g: null, W: 0, H: 0, span: 0, hits: [], lastDraw: 0 };
-const LANES = [["admin", "Admin panel", "10.66.0.20"], ["ssh", "SSH server", "10.66.0.21"], ["s3", "S3 bucket", "10.66.0.22"], ["ctrl", "Mirage", "response"]];
-function sizeReplay() {
-  const wrap = $("replay-wrap"), cv = $("replay"), dpr = Math.min(devicePixelRatio || 1, 2);
-  rp.cv = cv; rp.g = cv.getContext("2d"); rp.W = wrap.clientWidth; rp.H = wrap.clientHeight;
-  cv.width = Math.round(rp.W * dpr); cv.height = Math.round(rp.H * dpr); rp.g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  dirty.replay = true;
-}
-function niceStep(spanMs, target) {
-  const steps = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000, 1800000, 3600000];
-  return steps.find((s) => spanMs / s <= target) || steps[steps.length - 1];
-}
-function drawReplay(now) {
-  const g = rp.g; if (!g) return;
-  const { W, H } = rp, a = current();
-  g.clearRect(0, 0, W, H); rp.hits = [];
-  $("replay-empty").hidden = !!a;
-  if (!a) return;
-  const narrow = W < 640, L = narrow ? 92 : 150, Rm = 18, T = 40, laneH = narrow ? 40 : 46, depthH = narrow ? 52 : 62;
-  const pw = W - L - Rm, lanesTop = T, depthTop = T + laneH * 4 + 10, axisY = depthTop + depthH + 16;
-  const evs = eventsOf(a.ip), alerts = state.alerts.filter((x) => x.src_ip === a.ip), resps = state.responses.filter((x) => x.src_ip === a.ip);
-  const t0 = Math.min(tms(a.first_seen) || Infinity, evs.length ? evs[0]._t : Infinity);
-  let t1 = evs.length ? evs[evs.length - 1]._t : t0;
-  if (a.contained_at) t1 = Math.max(t1, tms(a.contained_at));
-  for (const x of alerts) t1 = Math.max(t1, tms(x.ts));
-  for (const x of resps) t1 = Math.max(t1, tms(x.ts));
-  const target = Math.max(t1 - t0, 1500) * 1.08;
-  rp.span = !rp.span || RM ? target : rp.span + (target - rp.span) * 0.18;
-  if (Math.abs(rp.span - target) > target * 0.002) dirty.replay = true;
-  const span = rp.span, x = (t) => L + ((t - t0) / span) * pw;
-  const laneY = (i) => lanesTop + laneH * i + laneH / 2;
-  const fs = narrow ? 11 : 12;
-
-  // lanes
-  for (let i = 0; i < 4; i++) {
-    g.fillStyle = i % 2 ? "rgba(11,24,35,.55)" : "rgba(8,18,27,.85)"; g.fillRect(0, lanesTop + laneH * i, W, laneH);
-    const [key, name, sub] = LANES[i], col = key === "ctrl" ? C.green : C[key];
-    g.fillStyle = rgba(col, 1); g.fillRect(0, lanesTop + laneH * i + 8, 2, laneH - 16);
-    g.textAlign = "left"; g.textBaseline = "alphabetic";
-    g.font = `600 ${narrow ? 12 : 14}px ${FONT_BODY}`; g.fillStyle = rgba(C.fg, 1); g.fillText(name, 12, laneY(i) - 1);
-    g.font = `${fs - 1}px ${FONT_MONO}`; g.fillStyle = rgba(C.faint, 1); g.fillText(sub, 12, laneY(i) + 14);
-    g.strokeStyle = rgba(C.edge, 1); g.beginPath(); g.moveTo(L, laneY(i)); g.lineTo(L + pw, laneY(i)); g.stroke();
-  }
-  // depth track
-  g.fillStyle = "rgba(8,18,27,.85)"; g.fillRect(0, depthTop, W, depthH);
-  g.font = `600 ${narrow ? 12 : 14}px ${FONT_BODY}`; g.fillStyle = rgba(C.fg, 1); g.fillText("Trail depth", 12, depthTop + depthH / 2 - 1);
-  g.font = `${fs - 1}px ${FONT_MONO}`; g.fillStyle = rgba(C.faint, 1); g.fillText("stage 0–6", 12, depthTop + depthH / 2 + 14);
-  const dy = (s) => depthTop + depthH - 6 - (s / 6) * (depthH - 12);
-  for (let s = 0; s <= 6; s += 2) { g.strokeStyle = rgba(C.edge, s ? 0.8 : 1); g.beginPath(); g.moveTo(L, dy(s)); g.lineTo(L + pw, dy(s)); g.stroke(); }
-
-  // time grid
-  const step = niceStep(span, narrow ? 4 : 9);
-  g.font = `${fs - 1}px ${FONT_MONO}`; g.textAlign = "center"; g.fillStyle = rgba(C.faint, 1);
-  for (let t = 0; t <= span; t += step) {
-    const xx = x(t0 + t);
-    g.strokeStyle = "rgba(42,82,102,.22)"; g.beginPath(); g.moveTo(xx, lanesTop); g.lineTo(xx, depthTop + depthH); g.stroke();
-    g.fillText(step < 1000 ? `+${(t / 1000).toFixed(1)}s` : step < 60000 ? `+${Math.round(t / 1000)}s` : `+${Math.round(t / 60000)}m`, xx, axisY);
-  }
-
-  // containment: hatch every decoy lane from the cut onward
-  const cAt = a.contained_at ? tms(a.contained_at) : 0;
-  if (cAt) {
-    const xc = x(cAt);
-    g.save(); g.beginPath(); g.rect(xc, lanesTop, L + pw - xc, laneH * 3); g.clip();
-    g.fillStyle = "rgba(61,220,151,.05)"; g.fillRect(xc, lanesTop, L + pw - xc, laneH * 3);
-    g.strokeStyle = "rgba(61,220,151,.22)"; g.lineWidth = 1.5;
-    for (let k = -laneH * 3; k < L + pw - xc + laneH * 3; k += 9) { g.beginPath(); g.moveTo(xc + k, lanesTop + laneH * 3); g.lineTo(xc + k + laneH * 3, lanesTop); g.stroke(); }
-    g.restore();
-    if (L + pw - xc > 80) { g.textAlign = "center"; g.font = `700 ${fs}px ${FONT_DISPLAY}`; g.fillStyle = rgba(C.green, 0.9); g.fillText("B L O C K E D", (xc + L + pw) / 2, laneY(1) + 4); }
-  }
-
-  // events: one tick each, brighter while fresh; stage first-touches get a diamond and a label
-  const lastLabel = {};
-  const ft = stageTimes(evs);
-  for (const e of evs) {
-    const d = DECOY_OF_SOURCE[e.source]; if (!d) continue;
-    const i = DECOYS.indexOf(d), xx = x(e._t), yy = laneY(i), fr = state.fresh.get(e.id), age = fr ? (now - fr) / 900 : 1;
-    const hot = age < 1;
-    g.strokeStyle = rgba(C[d], hot ? 1 : 0.5); g.lineWidth = hot ? 2 : 1.2;
-    const hh = hot ? 10 + (1 - age) * 8 : 8;
-    g.beginPath(); g.moveTo(xx, yy - hh); g.lineTo(xx, yy + hh); g.stroke();
-    if (hot) { g.fillStyle = rgba(C[d], 0.25 * (1 - age)); g.fillRect(xx - 8, yy - hh, 16, hh * 2); dirty.replay = true; }
-    rp.hits.push({ x: xx, y: yy, kind: "event", e });
-  }
-  for (const s of STAGES) {
-    const t = ft[s.n]; if (!t) continue;
-    const i = DECOYS.indexOf(s.decoy), xx = x(t), yy = laneY(i);
-    g.fillStyle = rgba(C.amber, 1); g.save(); g.translate(xx, yy); g.rotate(Math.PI / 4); g.fillRect(-5, -5, 10, 10); g.restore();
-    g.strokeStyle = rgba(C.bg, 1); g.lineWidth = 1; g.save(); g.translate(xx, yy); g.rotate(Math.PI / 4); g.strokeRect(-5, -5, 10, 10); g.restore();
-    const se = evs.find((e) => e._t === t && e.stage === s.n);
-    if (se) rp.hits.push({ x: xx, y: yy, kind: "event", e: se, prio: true });
-    const label = narrow ? `S${s.n}` : `S${s.n} ${s.name}`;
-    g.font = `600 ${fs}px ${FONT_BODY}`; const w = g.measureText(label).width;
-    const lx = Math.min(xx - w / 2, L + pw - w);
-    const row = lastLabel[i] != null && lx < lastLabel[i] + 6 ? 1 : 0;
-    const ly = row ? yy + 22 : yy - 12;
-    g.fillStyle = "rgba(4,7,11,.8)"; g.fillRect(lx - 3, ly - fs + 1, w + 6, fs + 4);
-    g.fillStyle = rgba(C.amber, 1); g.textAlign = "left"; g.fillText(label, lx, ly + 1);
-    if (!row) lastLabel[i] = lx + w;
-  }
-
-  // Mirage lane: alerts and responses
-  const yM = laneY(3);
-  for (const al of alerts) {
-    const xx = x(tms(al.ts)), sev = al.severity, col = sev === "critical" || sev === "high" ? C.red : sev === "medium" ? C.amber : C.dim;
-    g.fillStyle = rgba(col, 0.95); g.beginPath(); g.moveTo(xx, yM - 13); g.lineTo(xx + 5, yM - 4); g.lineTo(xx - 5, yM - 4); g.closePath(); g.fill();
-    rp.hits.push({ x: xx, y: yM - 8, kind: "alert", al });
-  }
-  // a response label is drawn only where it fits before the next marker
-  const marks = [...resps].reverse().map((r) => ({ r, xx: x(tms(r.ts)) }));
-  let respLabelEnd = -Infinity;
-  marks.forEach(({ r, xx }, i) => {
-    const isC = r.action === "containment_sequence", isR = r.action === "release";
-    g.fillStyle = rgba(isC ? C.green : isR ? C.hud : C.amber, 1); g.fillRect(xx - 5, yM + 2, 10, 10);
-    const label = isC ? "CONTAIN" : isR ? "RELEASE" : "SLOW DOWN";
-    g.font = `700 ${fs - 1}px ${FONT_DISPLAY}`; const w = g.measureText(label).width;
-    const limit = Math.min(L + pw, i + 1 < marks.length ? marks[i + 1].xx - 8 : Infinity);
-    if (xx + 9 > respLabelEnd && xx + 9 + w < limit) { g.textAlign = "left"; g.fillText(label, xx + 9, yM + 11); respLabelEnd = xx + 9 + w + 8; }
-    rp.hits.push({ x: xx, y: yM + 7, kind: "resp", r });
+// ------------------------------------------------------------------ engagement phases
+function renderPhases() {
+  const a = current(), host = $("phases"); host.replaceChildren();
+  const t0 = a ? tms(a.first_seen) : 0, evs = a ? eventsOf(a.ip) : [], ft = stageTimes(evs);
+  const al = a && firstAlert(a.ip), slow = a && [...state.responses].reverse().find((r) => r.src_ip === a.ip && r.action === "throttle_connection");
+  const baitT = a ? Math.min(...Object.values(ft), Infinity) : Infinity;
+  const P = [
+    ["Contact", "First packet hit a decoy", a ? t0 : null],
+    ["Detected", "Mirage raised the first alert", al ? tms(al.ts) : null],
+    ["Took the bait", "Followed the planted breadcrumbs", isFinite(baitT) ? baitT : null],
+    ["Slowed down", slow ? "Every request now waits" : "Tarpit at threat 40", slow ? tms(slow.ts) : null],
+    ["Intercepted", "Blocked on every decoy, session cut", a && a.contained_at ? tms(a.contained_at) : null],
+  ];
+  const fill = el("i", "fill"); host.append(fill);
+  let lastDone = -1;
+  P.forEach(([name, desc, t], i) => {
+    const li = el("li", "ph");
+    const done = t != null, skipped = !done && i === 3 && a && a.contained_at;
+    if (done) { li.classList.add(i === 4 ? "win" : "done"); lastDone = i; }
+    if (skipped) li.classList.add("skip");
+    li.append(el("span", "node", done && i === 4 ? "✓" : i + 1), el("b", null, name), el("span", null, skipped ? "Skipped · went straight to intercept" : desc), el("em", null, done ? fmtRel(t - t0) : skipped ? "—" : "waiting"));
+    host.append(li);
   });
-
-  // trail depth step line
-  const pts = [[t0, 0]]; for (const s of STAGES) if (ft[s.n]) pts.push([ft[s.n], s.n]);
-  const tEnd = cAt || (evs.length ? evs[evs.length - 1]._t : t0);
-  g.beginPath(); g.moveTo(x(t0), dy(0));
-  let prev = 0; for (const [t, s] of pts) { g.lineTo(x(t), dy(prev)); g.lineTo(x(t), dy(s)); prev = s; }
-  g.lineTo(x(tEnd), dy(prev));
-  g.strokeStyle = rgba(C.amber, 1); g.lineWidth = 2; g.stroke();
-  g.lineTo(x(tEnd), dy(0)); g.closePath(); g.fillStyle = rgba(C.amber, 0.12); g.fill();
-  if (cAt) { g.strokeStyle = rgba(C.green, 0.9); g.lineWidth = 2; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(x(cAt), dy(prev)); g.lineTo(L + pw, dy(prev)); g.stroke(); g.setLineDash([]); }
-  g.textAlign = "right"; g.font = `600 ${fs}px ${FONT_DISPLAY}`; g.fillStyle = rgba(C.amber, 1);
-  g.fillText(`stage ${prev}`, L + pw - 4, dy(prev) - 5);
-
-  // T0 and the containment cut
-  g.strokeStyle = rgba(C.hud, 0.7); g.setLineDash([2, 3]); g.lineWidth = 1;
-  g.beginPath(); g.moveTo(x(t0), 22); g.lineTo(x(t0), depthTop + depthH); g.stroke(); g.setLineDash([]);
-  const lag = detectLag(a);
-  g.textAlign = "left"; g.font = `600 ${fs}px ${FONT_MONO}`; g.fillStyle = rgba(C.hud, 1);
-  g.fillText(narrow ? "T0" : `T0 first contact${isNaN(lag) ? "" : ` · detected in ${fmtDur(lag)}`}`, x(t0) + 6, 18);
-  if (cAt) {
-    const xc = x(cAt);
-    g.strokeStyle = rgba(C.green, 1); g.lineWidth = 2; g.shadowColor = rgba(C.green, 0.8); g.shadowBlur = 10;
-    g.beginPath(); g.moveTo(xc, 26); g.lineTo(xc, depthTop + depthH); g.stroke(); g.shadowBlur = 0;
-    const label = `CONTAINED ${fmtRel(cAt - t0)}`;
-    g.font = `700 ${fs + 1}px ${FONT_DISPLAY}`; const w = g.measureText(label).width;
-    const right = xc + w + 8 > L + pw; g.textAlign = right ? "right" : "left"; g.fillStyle = rgba(C.green, 1);
-    g.fillText(label, xc + (right ? -8 : 8), 34);
-  }
-}
-function replayHover(ev) {
-  const tip = $("tip"), r = rp.cv.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
-  let best = null, bd = 12;
-  for (const h of rp.hits) { const d = Math.hypot(h.x - mx, (h.y - my) * 0.6) - (h.prio ? 6 : 0); if (d < bd) { bd = d; best = h; } }
-  if (!best) { tip.hidden = true; return; }
-  const a = current(), t0 = a ? tms(a.first_seen) : 0;
-  tip.replaceChildren();
-  if (best.kind === "event") {
-    const e = best.e, d = DECOY_OF_SOURCE[e.source];
-    tip.append(el("b", null, `${DECOY_NAME[d] || e.source}${e.stage ? ` · stage ${e.stage}` : ""}`), partsInto(el("span"), describe(e)), el("em", null, `${fmtTime(e.ts)} · ${fmtRel(e._t - t0)}`));
-  } else if (best.kind === "alert") {
-    const al = best.al;
-    tip.append(el("b", null, `Alert · ${al.severity || "low"}`), el("span", null, al.title || "alert"), el("em", null, `${fmtTime(al.ts)} · ${fmtRel(tms(al.ts) - t0)}`));
-  } else {
-    const x = best.r, d = x.details || {};
-    tip.append(el("b", null, x.action === "containment_sequence" ? "Mirage · contained" : x.action === "release" ? "Mirage · released" : "Mirage · slowing down"), el("span", null, d.reason || x.playbook || ""), el("em", null, `${fmtTime(x.ts)} · ${fmtRel(tms(x.ts) - t0)}`));
-  }
-  tip.hidden = false;
-  const tw = tip.offsetWidth, th = tip.offsetHeight;
-  tip.style.left = clamp(best.x - tw / 2, 4, rp.W - tw - 4) + "px";
-  tip.style.top = (best.y - th - 14 < 0 ? best.y + 16 : best.y - th - 14) + "px";
+  const nowIdx = a && !a.contained_at ? Math.min(4, lastDone + 1) : -1;
+  if (nowIdx >= 0) host.children[nowIdx + 1].classList.add("now");
+  requestAnimationFrame(() => { fill.style.width = (lastDone <= 0 ? 0 : (lastDone / 4) * 80) + "%"; });
+  const badge = $("engage-badge");
+  badge.textContent = !a ? "No engagement" : a.contained_at ? `Intercepted in ${fmtDur(tms(a.contained_at) - t0)}` : "Engagement live";
+  badge.className = "badge " + (!a ? "" : a.contained_at ? "contained" : "hostile");
+  $("engage-sub").textContent = a ? `${trackId(a.ip)} · ${a.ip} · from first contact to intercept` : "From first contact to intercept";
 }
 
-// ------------------------------------------------------------------ 4 · drawer
-function setCount(key, n, label) {
-  const b = $("n-" + key); b.textContent = label != null ? label : n;
-  if (counts[key] !== -1 && n > counts[key]) { const tab = $("tab-" + key); if (tab.getAttribute("aria-selected") !== "true") { tab.classList.remove("bump"); void tab.offsetWidth; tab.classList.add("bump"); } }
+// ------------------------------------------------------------------ charts
+let lastChart = 0;
+function tip(e, text, sub) {
+  const t = $("tip"); t.replaceChildren(text, el("small", null, sub)); t.hidden = false;
+  t.style.left = Math.min(e.clientX + 14, innerWidth - t.offsetWidth - 8) + "px"; t.style.top = (e.clientY - t.offsetHeight - 12) + "px";
+}
+const untip = () => { $("tip").hidden = true; };
+function renderCharts(animate) {
+  const a = current(), evs = a ? eventsOf(a.ip) : [];
+  const t0 = a ? tms(a.first_seen) : 0;
+  let t1 = evs.length ? evs[evs.length - 1]._t : t0; if (a && a.contained_at) t1 = Math.max(t1, tms(a.contained_at));
+  const span = Math.max(t1 - t0, 1000);
+  $("vol-total").textContent = evs.length.toLocaleString();
+
+  // contact volume: bars with a bright cap, the busiest bin in lime
+  { const host = $("vol"), W = host.clientWidth || 300, H = host.clientHeight || 210, N = 12, bins = new Array(N).fill(0);
+    for (const e of evs) bins[Math.min(N - 1, Math.floor(((e._t - t0) / span) * N))]++;
+    const max = Math.max(1, ...bins), peak = bins.indexOf(Math.max(...bins));
+    const svg = S("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" });
+    const defs = S("defs", {}, svg), lg = S("linearGradient", { id: "barGrad", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    S("stop", { offset: 0, "stop-color": "#f3f3ee", "stop-opacity": .16 }, lg); S("stop", { offset: 1, "stop-color": "#f3f3ee", "stop-opacity": 0 }, lg);
+    const top = 30, bottom = H - 22, bw = (W / N) * 0.62, gap = W / N, gb = S("g", { class: animate ? "bars" : "" }, svg);
+    bins.forEach((v, i) => {
+      const h = Math.max(2, (v / max) * (bottom - top)), x = i * gap + (gap - bw) / 2, y = bottom - h;
+      const r = S("rect", { x, y, width: bw, height: h, rx: 4, class: "bar-bg", style: `animation-delay:${i * 40}ms` }, gb);
+      S("rect", { x, y, width: bw, height: 3, rx: 1.5, class: "bar-cap" + (i === peak && v ? " peak" : ""), style: `animation-delay:${i * 40}ms` }, gb);
+      const hz = S("rect", { x: i * gap, y: 0, width: gap, height: H, class: "hit-zone" }, svg);
+      const from = (span / N) * i, to = (span / N) * (i + 1);
+      hz.addEventListener("mousemove", (e) => tip(e, `${v} event${v === 1 ? "" : "s"}`, `${fmtRel(from)} to ${fmtRel(to)}`)); hz.addEventListener("mouseleave", untip);
+      void r;
+    });
+    if (bins[peak]) {
+      const x = peak * gap + gap / 2, y = bottom - (bins[peak] / max) * (bottom - top) - 22, txt = `peak ${bins[peak]}`, w = txt.length * 7 + 14;
+      const pl = S("g", { class: "pill-lbl" }, svg); S("rect", { x: clamp(x - w / 2, 0, W - w), y, width: w, height: 18, rx: 9 }, pl); S("text", { x: clamp(x, w / 2, W - w / 2), y: y + 12.5, "text-anchor": "middle" }, pl, txt);
+    }
+    S("text", { x: 0, y: H - 4, class: "ax" }, svg, "+0s"); S("text", { x: W, y: H - 4, class: "ax", "text-anchor": "end" }, svg, fmtRel(span));
+    host.replaceChildren(svg);
+  }
+
+  // threat corridor: how deep (white) and how loud (lime alerts), with the intercept marked
+  { const host = $("corridor"), W = host.clientWidth || 400, H = host.clientHeight || 210, top = 24, bottom = H - 24;
+    const svg = S("svg", { viewBox: `0 0 ${W} ${H}` }), X = (t) => ((t - t0) / span) * (W - 8) + 4;
+    for (let s = 0; s <= 6; s += 2) { const y = bottom - (s / 6) * (bottom - top); S("line", { x1: 0, x2: W, y1: y, y2: y, stroke: "#242522", "stroke-dasharray": "2 4" }, svg); S("text", { x: 0, y: y - 4, class: "ax" }, svg, s ? `stage ${s}` : ""); }
+    const ft = stageTimes(evs), pts = [[X(t0), bottom]]; let prev = 0;
+    for (let s = 1; s <= 6; s++) if (ft[s]) { const x = X(ft[s]); pts.push([x - 0.01, bottom - (prev / 6) * (bottom - top)], [x, bottom - (s / 6) * (bottom - top)]); prev = s; }
+    pts.push([X(t1), bottom - (prev / 6) * (bottom - top)]);
+    const smooth = (P) => P.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+    const als = state.alerts.filter((x) => x.src_ip === (a && a.ip)).map((x) => tms(x.ts)).sort((p, q) => p - q);
+    const ap = [[X(t0), bottom]]; als.forEach((t, i) => ap.push([X(t), bottom - ((i + 1) / Math.max(1, als.length)) * (bottom - top) * .9]));
+    if (als.length) ap.push([X(t1), ap[ap.length - 1][1]]);
+    const l2 = S("path", { d: smooth(ap), class: "ln", stroke: "#d6f24c", opacity: .9 }, svg);
+    const l1 = S("path", { d: smooth(pts), class: "ln", stroke: "#f3f3ee" }, svg);
+    if (animate && !RM) for (const l of [l1, l2]) { requestAnimationFrame(() => { const len = l.getTotalLength(); l.style.setProperty("--len", len); l.classList.add("draw"); }); }
+    for (let s = 1; s <= 6; s++) if (ft[s]) {
+      const cx = X(ft[s]), cy = bottom - (s / 6) * (bottom - top);
+      const c = S("circle", { cx, cy, r: 4.5, fill: "#060606", stroke: "#f3f3ee", "stroke-width": 2 }, svg);
+      c.addEventListener("mousemove", (e) => tip(e, `Stage ${s} · ${STAGES[s - 1].name}`, fmtRel(ft[s] - t0))); c.addEventListener("mouseleave", untip);
+    }
+    if (a && a.contained_at) {
+      const x = X(tms(a.contained_at));
+      S("line", { x1: x, x2: x, y1: top - 6, y2: bottom, stroke: "#d6f24c", "stroke-width": 1.5, "stroke-dasharray": "3 3" }, svg);
+      const txt = `intercept ${fmtRel(tms(a.contained_at) - t0)}`, w = txt.length * 6.6 + 14, px = clamp(x - w / 2, 0, W - w);
+      const pl = S("g", { class: "pill-lbl" }, svg); S("rect", { x: px, y: top - 22, width: w, height: 18, rx: 9 }, pl); S("text", { x: px + w / 2, y: top - 9.5, "text-anchor": "middle" }, pl, txt);
+    }
+    const lg = S("g", {}, svg);
+    S("circle", { cx: W - 150, cy: H - 6, r: 4, fill: "#f3f3ee" }, lg); S("text", { x: W - 142, y: H - 2, class: "ax" }, lg, "depth");
+    S("circle", { cx: W - 88, cy: H - 6, r: 4, fill: "#d6f24c" }, lg); S("text", { x: W - 80, y: H - 2, class: "ax" }, lg, "alerts");
+    host.replaceChildren(svg);
+  }
+
+  // bases under fire: a half gauge split by decoy
+  { const host = $("gauge"), W = host.clientWidth || 300, H = host.clientHeight || 210;
+    const counts = { admin: 0, ssh: 0, s3: 0 }; for (const e of evs) { const d = DECOY_OF_SOURCE[e.source]; if (d) counts[d]++; }
+    const total = counts.admin + counts.ssh + counts.s3, cx = W / 2, cy = H - 44, r = Math.min(W / 2 - 16, H - 70);
+    const svg = S("svg", { viewBox: `0 0 ${W} ${H}` });
+    const arc = (a0, a1) => { const p = (a) => [cx + Math.cos(a) * r, cy + Math.sin(a) * r], [x0, y0] = p(a0), [x1, y1] = p(a1); return `M${x0} ${y0} A${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1} ${y1}`; };
+    S("path", { d: arc(Math.PI, Math.PI * 2), fill: "none", stroke: "#242522", "stroke-width": 14, "stroke-linecap": "round" }, svg);
+    const COL = { admin: "#f3f3ee", ssh: "#d6f24c", s3: "#8f908a" };
+    let a0 = Math.PI;
+    for (const d of DECOYS) {
+      if (!counts[d]) continue;
+      const a1 = a0 + (counts[d] / total) * Math.PI, seg = S("path", { d: arc(a0 + .015, Math.max(a0 + .03, a1 - .015)), fill: "none", stroke: COL[d], "stroke-width": 14, "stroke-linecap": "butt" }, svg);
+      if (animate && !RM) { const len = r * (a1 - a0); seg.style.cssText = `stroke-dasharray:${len};stroke-dashoffset:${len};transition:stroke-dashoffset 1.1s cubic-bezier(.22,.9,.25,1)`; requestAnimationFrame(() => requestAnimationFrame(() => { seg.style.strokeDashoffset = 0; })); }
+      seg.addEventListener("mousemove", (e) => tip(e, `${BASES[d].name}: ${counts[d]} events`, `${Math.round((counts[d] / total) * 100)}% of this track's activity`)); seg.addEventListener("mouseleave", untip);
+      a0 = a1;
+    }
+    S("text", { x: cx, y: cy - 14, "text-anchor": "middle", fill: "#f3f3ee", style: "font: 500 40px Geist, sans-serif; letter-spacing:-.04em" }, svg, total.toLocaleString());
+    S("text", { x: cx, y: cy + 8, "text-anchor": "middle", class: "ax" }, svg, "hostile events");
+    host.replaceChildren(svg);
+    const legend = el("div", "gauge-legend");
+    for (const d of DECOYS) { const sp = el("span"); const i = el("i"); i.style.background = COL[d]; sp.append(i, `${BASES[d].name} ${counts[d]}`); legend.append(sp); }
+    host.append(legend);
+  }
+}
+
+// ------------------------------------------------------------------ alert queue
+const counts = {};
+function setCount(key, n, labelText) {
+  $("n-" + key).textContent = labelText != null ? labelText : n;
+  if (counts[key] != null && n > counts[key]) { const tab = $("tab-" + key); if (tab.getAttribute("aria-selected") !== "true") { tab.classList.remove("bump"); void tab.offsetWidth; tab.classList.add("bump"); } }
   counts[key] = n;
 }
-function renderFeed() {
-  const host = $("feed"), frag = document.createDocumentFragment(), ev = state.events, n = Math.min(ev.length, MAX_FEED);
-  for (let i = ev.length - 1; i >= ev.length - n; i--) {
-    const e = ev[i], d = DECOY_OF_SOURCE[e.source], st = e.stage || 0;
-    const row = el("div", "row" + (st ? " stage" : "") + (state.fresh.has(e.id) && performance.now() - state.fresh.get(e.id) < 1500 ? " fresh" : ""));
-    row.append(el("span", "t", fmtTime(e.ts)), el("span", "src s-" + (d || "ctrl"), SRC_TAG[d] || String(e.source || "").toUpperCase()), partsInto(el("span", "what"), [[`${e.src_ip}  `, 3], ...describe(e)]), el("span", "sx", st ? "S" + st : ""));
-    frag.append(row);
+const seenRows = new Set();
+function renderQueue() {
+  // alerts
+  { const host = $("alerts"), frag = document.createDocumentFragment();
+    for (const al of state.alerts.slice(0, MAX_ROWS)) {
+      const a = state.attackers.get(al.src_ip), sev = al.severity || "low", key = "a" + (al.id || al.ts + al.title);
+      const row = el("div", "row" + (state.booted && !seenRows.has(key) ? " fresh" : "")); seenRows.add(key);
+      const what = el("span", "what"); what.append(el("b", null, al.title || "Alert"));
+      const v = el("button", "view", "View"); v.type = "button"; v.addEventListener("click", () => { selectTrack(al.src_ip, true); document.getElementById("airspace").scrollIntoView({ behavior: RM ? "auto" : "smooth" }); });
+      row.append(el("span", "t", fmtTime(al.ts)), what, el("span", "trkid", trackId(al.src_ip)), el("span", "sev " + sev, sev), el("span", "stat" + (a && a.contained_at ? " ok" : ""), a && a.contained_at ? "Intercepted" : "Open"), v);
+      frag.append(row);
+    }
+    host.replaceChildren(frag); $("alerts-empty").hidden = state.alerts.length > 0; setCount("alerts", state.alerts.length);
   }
-  host.replaceChildren(frag);
-  $("feed-empty").hidden = n > 0;
-  setCount("feed", ev.length);
-}
-function renderTheft() {
-  const host = $("theft"), frag = document.createDocumentFragment(), firstBy = {};
-  for (const e of state.events) if (e.honeytoken_id && !firstBy[e.honeytoken_id]) firstBy[e.honeytoken_id] = e;
-  let taken = 0;
-  for (const s of STAGES) {
-    const e = firstBy[s.token], card = el("div", "token" + (e ? " taken" : ""));
-    if (e) taken++;
-    card.append(el("span", "st", `Stage ${s.n} · ${e ? "taken" : "planted"}`), el("span", "nm", TOKEN_NAME[s.token]),
-      el("span", "where", e ? `${e.src_ip} · ${fmtTime(e.ts)} · ${DECOY_NAME[s.decoy]}` : `waiting on the ${DECOY_NAME[s.decoy].toLowerCase()}`));
-    frag.append(card);
+  // live feed
+  { const host = $("feed"), frag = document.createDocumentFragment(), ev = state.events, n = Math.min(ev.length, MAX_ROWS);
+    for (let i = ev.length - 1; i >= ev.length - n; i--) {
+      const e = ev[i], d = DECOY_OF_SOURCE[e.source], f = state.fresh.get(e.id);
+      const row = el("div", "row feed-row" + (f && performance.now() - f < 1500 ? " fresh" : ""));
+      row.append(el("span", "t", fmtTime(e.ts)), el("span", "src", SRC_TAG[d] || String(e.source || "").toUpperCase()), partsInto(el("span", "what"), [[`${trackId(e.src_ip)}  `, 3], ...describe(e)]), el("span", "stg", e.stage ? "S" + e.stage : ""));
+      frag.append(row);
+    }
+    host.replaceChildren(frag); $("feed-empty").hidden = n > 0; setCount("feed", ev.length);
   }
-  host.replaceChildren(frag);
-  $("theft-empty").hidden = true;
-  setCount("theft", taken, `${taken}/6`);
-}
-function renderAttack() {
-  const techs = new Map(), tacs = new Map();
-  for (const e of state.events) for (const t of e.techniques || []) { techs.set(t, (techs.get(t) || 0) + 1); const tc = TACTIC_OF[t]; if (tc) (tacs.get(tc) || tacs.set(tc, new Set()).get(tc)).add(t); }
-  const m = $("matrix"), frag = document.createDocumentFragment();
-  for (const [id, name] of TACTICS) {
-    const ids = tacs.get(id), c = el("div", "tac" + (ids ? " on" : ""));
-    c.append(el("span", "tn", name), el("span", "ti", ids ? [...ids].join(" ") : "not seen"));
-    frag.append(c);
+  // stolen baits
+  { const host = $("loot"), firstBy = {}; let taken = 0;
+    for (const e of state.events) if (e.honeytoken_id && !firstBy[e.honeytoken_id]) firstBy[e.honeytoken_id] = e;
+    host.replaceChildren(...STAGES.map((s) => {
+      const e = firstBy[s.token], c = el("div", "tok" + (e ? " taken" : "")); if (e) taken++;
+      c.append(el("span", "k", `Stage ${s.n} · ${e ? "taken" : "planted"}`), el("b", null, TOKEN_NAME[s.token]), el("span", null, e ? `${trackId(e.src_ip)} · ${e.src_ip} · ${fmtClock(e.ts)}` : `waiting on the ${BASES[s.decoy].name.toLowerCase()}`));
+      return c;
+    }));
+    setCount("loot", taken, `${taken}/6`);
   }
-  m.replaceChildren(frag);
-  const list = [...techs.entries()].sort((a, b) => b[1] - a[1]), max = list.length ? list[0][1] : 1, f2 = document.createDocumentFragment();
-  for (const [id, n] of list) { const t = el("div", "tech"); t.style.setProperty("--w", Math.round((n / max) * 100) + "%"); t.append(el("span", "id", id), el("span", "nm", ATTACK[id] || "technique"), el("span", "n", "×" + n)); f2.append(t); }
-  $("techs").replaceChildren(f2);
-  setCount("attack", list.length);
-}
-function renderAlerts() {
-  const host = $("alerts"), frag = document.createDocumentFragment();
-  for (const a of state.alerts.slice(0, 150)) {
-    const row = el("div", "row sev-" + (a.severity || "low"));
-    const body = el("span", "what"); body.append(el("b", null, a.title || "alert"), ` · ${a.src_ip}${a.stage ? " · stage " + a.stage : ""}`);
-    row.append(el("span", "t", fmtTime(a.ts)), el("span", "src", String(a.severity || "low").toUpperCase().slice(0, 4)), body, el("span", "sx", a.stage ? "S" + a.stage : ""));
-    frag.append(row);
+  // ATT&CK
+  { const techs = new Map(), tacs = new Map();
+    for (const e of state.events) for (const t of e.techniques || []) { techs.set(t, (techs.get(t) || 0) + 1); const tc = TACTIC_OF[t]; if (tc) { if (!tacs.has(tc)) tacs.set(tc, new Set()); tacs.get(tc).add(t); } }
+    $("matrix").replaceChildren(...TACTICS.map(([id, name]) => { const ids = tacs.get(id), c = el("div", "tac" + (ids ? " on" : "")); c.append(el("b", null, name), el("span", null, ids ? [...ids].join(" ") : "not seen")); return c; }));
+    const list = [...techs.entries()].sort((p, q) => q[1] - p[1]);
+    $("techs").replaceChildren(...list.map(([id, n]) => { const t = el("div", "tech"); t.append(el("span", "id", id), el("span", null, ATTACK[id] || "technique"), el("span", "n", "×" + n)); return t; }));
+    setCount("attack", list.length);
   }
-  host.replaceChildren(frag);
-  $("alerts-empty").hidden = state.alerts.length > 0;
-  setCount("alerts", state.alerts.length);
-}
-const ACTION_NAME = { containment_sequence: "Contained", throttle_connection: "Slowing down", release: "Released" };
-function renderResponses() {
-  const host = $("resp"), frag = document.createDocumentFragment();
-  for (const r of state.responses.slice(0, 100)) {
-    const row = el("div", "row"), d = r.details || {}, acts = d.actions || {};
-    const body = el("span", "what"); body.append(el("b", null, ACTION_NAME[r.action] || String(r.action || "").replace(/_/g, " ")), ` · ${r.src_ip}${d.reason ? " · " + d.reason : ""}`);
-    const steps = el("div", "steps"), add = (txt, kind) => steps.append(el("span", kind, txt));
-    if (acts.eviction) { const n = acts.eviction.terminated || 0; add(n ? `evicted ${n} SSH session${n > 1 ? "s" : ""}` : "no live session to evict", n ? "real" : ""); }
-    if (acts.enforcement) { const n = Array.isArray(acts.enforcement) ? acts.enforcement.length : (acts.enforcement.reached || []).length; add(`blocked on ${n} decoy${n === 1 ? "" : "s"}`, n ? "real" : ""); }
-    if (acts.firewall) { const be = acts.firewall.backend || (typeof acts.firewall === "string" ? acts.firewall : ""); add(`firewall · ${be || "unknown"}`, be && be !== "simulated" ? "real" : "sim"); }
-    if (acts.snapshot) { const be = acts.snapshot.backend || ""; add(`evidence snapshot · ${be || "unknown"}`, be && be !== "simulated" ? "real" : "sim"); }
-    if (d.delay_seconds) add(`${d.delay_seconds} s delay per request`, "real");
-    if (steps.childElementCount) body.append(steps);
-    const tag = r.action === "containment_sequence" ? "s-ctrl" : r.action === "release" ? "s-ssh" : "s-s3";
-    row.append(el("span", "t", fmtTime(r.ts)), el("span", "src " + tag, r.action === "containment_sequence" ? "CUT" : r.action === "release" ? "FREE" : "SLOW"), body, el("span", "sx"));
-    frag.append(row);
+  // responses
+  { const NAME = { containment_sequence: "Intercepted", throttle_connection: "Slowed down", release: "Released" };
+    const host = $("resp");
+    host.replaceChildren(...state.responses.slice(0, 100).map((r) => {
+      const row = el("div", "row resp-row"), d = r.details || {}, acts = d.actions || {};
+      const body = el("span", "what"); body.append(el("b", null, `${trackId(r.src_ip)} · ${r.src_ip}`), d.reason ? ` · ${d.reason}` : "");
+      const steps = el("div", "steps"), add = (txt, real) => steps.append(el("span", real ? "real" : null, txt));
+      if (acts.eviction) { const n = acts.eviction.terminated || 0; add(n ? `kicked ${n} SSH session${n > 1 ? "s" : ""}` : "no live session to kick", n > 0); }
+      if (acts.enforcement) { const n = Array.isArray(acts.enforcement) ? acts.enforcement.length : (acts.enforcement.reached || []).length; add(`blocked on ${n} decoy${n === 1 ? "" : "s"}`, n > 0); }
+      if (acts.firewall) { const be = acts.firewall.backend || ""; add(`firewall · ${be || "unknown"}`, be && be !== "simulated"); }
+      if (acts.snapshot) { const be = acts.snapshot.backend || ""; add(`evidence snapshot · ${be || "unknown"}`, be && be !== "simulated"); }
+      if (d.delay_seconds) add(`${d.delay_seconds} s delay per request`, true);
+      if (steps.childElementCount) body.append(steps);
+      row.append(el("span", "t", fmtTime(r.ts)), el("span", "sev " + (r.action === "containment_sequence" ? "info" : r.action === "release" ? "low" : "medium"), NAME[r.action] || r.action), body);
+      return row;
+    }));
+    $("resp-empty").hidden = state.responses.length > 0; setCount("resp", state.responses.length);
   }
-  host.replaceChildren(frag);
-  $("resp-empty").hidden = state.responses.length > 0;
-  setCount("resp", state.responses.length);
 }
 function selectTab(btn) {
-  for (const t of document.querySelectorAll('[role="tab"]')) {
-    const on = t === btn; t.setAttribute("aria-selected", on); t.tabIndex = on ? 0 : -1;
-    $(t.getAttribute("aria-controls")).hidden = !on;
+  for (const t of document.querySelectorAll('#tabs [role="tab"]')) {
+    const on = t === btn; t.setAttribute("aria-selected", on); t.tabIndex = on ? 0 : -1; $(t.getAttribute("aria-controls")).hidden = !on;
   }
+  moveInk();
 }
+function moveInk() { const b = document.querySelector('#tabs [aria-selected="true"]'), ink = $("tab-ink"); if (!b) return; ink.style.left = b.offsetLeft + "px"; ink.style.width = b.offsetWidth + "px"; }
 
 // ------------------------------------------------------------------ loop
-let lastClock = "", errCount = 0, lastFeed = 0;
-function flush(now) {
-  for (const [id, t] of state.fresh) if (now - t > 2000) state.fresh.delete(id);
-  if (dirty.model) { dirty.model = false; renderModel(); }
-  // the feed can take thousands of rows during a scan; repaint it at most 4x a second
-  if (dirty.feed && now - lastFeed > 250) { dirty.feed = false; lastFeed = now; renderFeed(); }
-  if (dirty.alerts) { dirty.alerts = false; renderAlerts(); }
-  if (dirty.resp) { dirty.resp = false; renderResponses(); }
-  if (dirty.theft) { dirty.theft = false; renderTheft(); }
-  if (dirty.attack) { dirty.attack = false; renderAttack(); }
-  const c = new Date().toLocaleTimeString([], { hour12: false }); if (c !== lastClock) { lastClock = c; $("clock").textContent = c; }
-}
-function tick(now) {
+let lastClock = "", lastQueue = 0, errs = 0;
+function frame(now) {
   try {
-    drawHud(now);
-    if (dirty.replay && now - rp.lastDraw > 30) { dirty.replay = false; rp.lastDraw = now; drawReplay(now); }
-    flush(now); updateSentence(now); renderRisk();
-  } catch (e) { if (errCount++ < 5) console.error("render error", e); }
-  requestAnimationFrame(tick);
+    drawMap(now);
+    for (const [id, t] of state.fresh) if (now - t > 2500) state.fresh.delete(id);
+    if (dirty.model) { dirty.model = false; renderHero(); renderKpis(); renderLock(); renderPhases(); }
+    if (dirty.queue && now - lastQueue > 300) { dirty.queue = false; lastQueue = now; renderQueue(); }
+    if (dirty.charts && now - lastChart > 500) { dirty.charts = false; renderCharts(now - lastChart > 2500); lastChart = now; }
+    const c = new Date().toLocaleTimeString([], { hour12: false });
+    if (c !== lastClock) { lastClock = c; $("clock").textContent = c; tickLockClock(); }
+  } catch (e) { if (errs++ < 5) console.error("render error", e); }
+  requestAnimationFrame(frame);
 }
-// rAF pauses in a hidden tab; keep the DOM current so the page is right when it comes back
-setInterval(() => { if (document.hidden) { try { flush(performance.now()); } catch (e) { if (errCount++ < 5) console.error("render error", e); } } }, 1000);
 
 // ------------------------------------------------------------------ io
-async function control(kind, ip) {
-  try { await fetch(`/api/${kind}/${encodeURIComponent(ip)}`, { method: "POST" }); }
-  catch (e) { console.warn("control failed", e); }
-}
+async function control(kind, ip) { try { await fetch(`/api/${kind}/${encodeURIComponent(ip)}`, { method: "POST" }); } catch (e) { console.warn("control failed", e); } }
 async function loadInitial() {
   const get = (u) => fetch(u).then((r) => r.json());
-  const [events, alerts, responses, attackers] = await Promise.all([
-    get("/api/events?limit=2000"), get("/api/alerts?limit=300"), get("/api/responses?limit=200"), get("/api/attackers"),
-  ]);
+  const [events, alerts, responses, attackers] = await Promise.all([get("/api/events?limit=2000"), get("/api/alerts?limit=300"), get("/api/responses?limit=200"), get("/api/attackers")]);
   for (const e of [...events].reverse()) addEvent(e, false);
   for (const a of [...alerts].reverse()) addAlert(a);
   for (const r of [...responses].reverse()) addResponse(r);
-  for (const a of attackers) upsertAttacker(a);
+  for (const a of [...attackers].sort((p, q) => tms(p.first_seen) - tms(q.first_seen))) upsertAttacker(a);
+  for (const [, t] of map.tracks) t.pos = 0;   // tracks fly in from the entry corridor on first paint
 }
-function setConn(up, text) { const c = $("conn"); c.classList.toggle("up", up); c.classList.toggle("down", !up); $("conn-text").textContent = text; }
+function setLink(up, text) { $("link-dot").className = "link-dot " + (up ? "up" : "down"); $("link-text").textContent = text; }
 let backoff = 500;
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-  ws.onopen = () => { setConn(true, "live"); backoff = 500; };
-  ws.onclose = () => { setConn(false, "reconnecting"); setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 8000); };
+  ws.onopen = () => { setLink(true, "Live"); backoff = 500; };
+  ws.onclose = () => { setLink(false, "Reconnecting"); setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 8000); };
   ws.onerror = () => ws.close();
   ws.onmessage = (ev) => {
     let msg; try { msg = JSON.parse(ev.data); } catch { return; }
@@ -857,39 +993,34 @@ function connect() {
     else if (msg.type === "attacker") upsertAttacker(msg.data);
   };
 }
-// A reset on the controller empties the database; a full reload is the simplest way to clear the view.
+// a controller reset empties the database; reloading is the cleanest way to clear the view
 async function watchReset() {
-  try {
-    const list = await fetch("/api/attackers").then((r) => r.json());
-    if (state.attackers.size && !list.length) location.reload();
-  } catch { /* controller restarting; the socket handles it */ }
+  try { const list = await fetch("/api/attackers").then((r) => r.json()); if (state.attackers.size && !list.length) location.reload(); } catch { /* restarting */ }
 }
 
 // ------------------------------------------------------------------ boot
 (function boot() {
-  const segs = $("risk-segs");
-  for (let i = 0; i < 20; i++) { const s = el("i", i < 8 ? "w" : i < 15 ? "t" : "c"); segs.append(s); }
+  buildTerrain(); buildDial(); sizeMap(); bindMap();
+  new ResizeObserver(() => { sizeMap(); dirty.charts = true; lastChart = 0; }).observe($("map-wrap"));
+  addEventListener("resize", moveInk);
   $("btn-contain").addEventListener("click", () => { const a = current(); if (a) control("contain", a.ip); });
   $("btn-release").addEventListener("click", () => { const a = current(); if (a) control("uncontain", a.ip); });
-  const step = (d) => { const list = ranked(); if (list.length < 2) return; const a = current(); const i = list.findIndex((x) => x.ip === a.ip); state.selected = list[(i + d + list.length) % list.length].ip; dirty.model = dirty.replay = true; };
-  $("pick-prev").addEventListener("click", () => step(-1));
-  $("pick-next").addEventListener("click", () => step(1));
-  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  const toQueue = () => { selectTab($("tab-alerts")); $("queue").scrollIntoView({ behavior: RM ? "auto" : "smooth" }); };
+  $("check-alerts").addEventListener("click", toQueue); $("bell").addEventListener("click", toQueue);
+  const tabs = [...document.querySelectorAll('#tabs [role="tab"]')];
   tabs.forEach((t, i) => {
     t.tabIndex = t.getAttribute("aria-selected") === "true" ? 0 : -1;
     t.addEventListener("click", () => selectTab(t));
-    t.addEventListener("keydown", (e) => {
-      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0; if (!d) return;
-      const n = tabs[(i + d + tabs.length) % tabs.length]; selectTab(n); n.focus(); e.preventDefault();
-    });
+    t.addEventListener("keydown", (e) => { const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0; if (!d) return; const n = tabs[(i + d + tabs.length) % tabs.length]; selectTab(n); n.focus(); e.preventDefault(); });
   });
-  sizeHud(); sizeReplay();
-  new ResizeObserver(sizeHud).observe($("hud-wrap"));
-  new ResizeObserver(sizeReplay).observe($("replay-wrap"));
-  $("replay").addEventListener("mousemove", replayHover);
-  $("replay").addEventListener("mouseleave", () => { $("tip").hidden = true; });
-  if (document.fonts) document.fonts.ready.then(() => { dirty.replay = true; });
-  requestAnimationFrame(tick);
-  loadInitial().catch((e) => console.warn("initial load failed", e)).finally(() => { state.booted = true; dirty.model = dirty.replay = true; connect(); });
+  // the rail follows the section in view
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("on", b.dataset.sec === en.target.id));
+  }, { rootMargin: "-40% 0px -55% 0px" });
+  ["overview", "airspace", "engagement", "queue"].forEach((id) => io.observe($(id)));
+  if (document.fonts) document.fonts.ready.then(() => { moveInk(); map.cacheKey = ""; dirty.charts = true; });
+  setTimeout(moveInk, 300);
+  requestAnimationFrame(frame);
+  loadInitial().catch((e) => console.warn("initial load failed", e)).finally(() => { state.booted = true; dirty.model = dirty.queue = dirty.charts = true; connect(); });
   setInterval(watchReset, 5000);
 })();
