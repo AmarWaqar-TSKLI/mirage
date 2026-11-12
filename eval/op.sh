@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # op: the attacker's console for live demos.
 #
-#   op          guided: press Enter to launch each phase
-#   op --auto   run every phase back to back
-#   op watch    live uplink monitor: can this machine still reach each target?
+#   op              run the whole attack by itself, pausing 8 s between phases
+#                   with a countdown, so the audience can watch the dashboard
+#   op --pause 5    the same with a different pause (seconds)
+#   op --step       wait for Enter before each phase instead
+#   op --fast       no pauses at all (also --auto)
+#   op watch        live uplink monitor: can this machine still reach each target?
 #
 # Walks the same breadcrumb trail as campaign.sh with the same real tools
 # (nmap, gobuster, hydra, curl, ssh, aws), but narrates it: what each tool
@@ -13,7 +16,16 @@ set -u
 export LC_ALL=C.UTF-8   # the spinner and box drawing are multi-byte
 
 ADMIN=10.66.0.20 SSH_HOST=10.66.0.21 S3=10.66.0.22 S3_PORT=9000
-AUTO=0; [ "${1:-}" = "--auto" ] && AUTO=1
+MODE=paced PAUSE=${OP_PAUSE:-8}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --step) MODE=step ;;
+        --fast|--auto) MODE=fast ;;
+        --pause) PAUSE="${2:-8}"; shift ;;
+        watch) break ;;
+    esac
+    shift
+done
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"; printf "\e[?25h"' EXIT
 
 # ------------------------------------------------------------------ look and feel
@@ -27,13 +39,29 @@ type_out() {   # type a line out character by character
     for ((i = 0; i < ${#s}; i++)); do printf '%s' "${s:i:1}"; sleep 0.008; done
     printf '\n'
 }
+countdown() {  # countdown SECONDS LABEL : a filling bar, so the room knows when the next move lands
+    local secs="$1" label="$2" steps i filled full empty
+    steps=$((secs * 4)); printf '\e[?25l'
+    for ((i = 0; i <= steps; i++)); do
+        filled=$((i * 24 / (steps > 0 ? steps : 1)))
+        # bash replacement, not tr: tr is byte-based and mangles multi-byte block characters
+        full=$(printf '%*s' "$filled" ''); empty=$(printf '%*s' $((24 - filled)) '')
+        printf '\r  %s▸ next%s %s  %s%s%s%s%s %ss\e[K' "$G" "$X" "$label" "$G" "${full// /▓}" "$D" "${empty// /░}" "$X" "$(( (steps - i + 3) / 4 ))"
+        sleep 0.25
+    done
+    printf '\r\e[K\e[?25h'
+}
+wait_turn() {  # wait_turn LABEL : pause the way the chosen mode says
+    case "$MODE" in
+        step) printf '\n  %s▸ press ENTER for%s %s ' "$G" "$X" "$1"; read -r _ ;;
+        paced) printf '\n'; countdown "$PAUSE" "$1" ;;
+    esac
+}
 phase() {      # phase header: number, title, what we are about to do
     local n="$1" title="$2" why="$3"
+    [ "$n" -gt 1 ] && wait_turn "${W}${B}PHASE $n${X} · $title"
     box "$D" "${Y}${B}PHASE $n/7${X}  ${W}${B}$title${X}"
     printf '  %s' "$D"; type_out "$why"; printf '%s' "$X"
-    if [ "$AUTO" = 0 ]; then
-        printf '\n  %s▸ press ENTER to launch%s ' "$G" "$X"; read -r _
-    fi
 }
 run() {        # run a real command in the background with a spinner, output to $WORK/out
     local label="$1"; shift
@@ -154,7 +182,8 @@ printf '%s' "$X"
 printf '  %sintrusion toolkit · operator %s · target Halcyon Freight internal net%s\n\n' "$D" "$(hostname -I | awk '{print $1}')" "$X"
 type_out "  [*] objective: reach finance/passwords.xlsx and get out unseen"
 type_out "  [*] route:     web server → deploy box → cloud storage"
-[ "$AUTO" = 0 ] && { printf '\n  %s▸ press ENTER to start the operation%s ' "$G" "$X"; read -r _; }
+[ "$MODE" = paced ] && { printf '\n'; countdown 4 "${W}${B}operation starts${X}"; }
+[ "$MODE" = step ] && { printf '\n  %s▸ press ENTER to start the operation%s ' "$G" "$X"; read -r _; }
 START=$(date +%s.%N)
 
 # ------------------------------------------------------------------ 1 recon
