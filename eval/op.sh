@@ -17,6 +17,8 @@ export LC_ALL=C.UTF-8   # the spinner and box drawing are multi-byte
 
 ADMIN=10.66.0.20 SSH_HOST=10.66.0.21 S3=10.66.0.22 S3_PORT=9000
 MODE=paced PAUSE=${OP_PAUSE:-8}
+WATCHFUL=0   # set once we have touched a decoy: from then on, notice the moment we are cut off
+CUT=0        # 1 when we noticed the block ourselves, not through a refused command
 while [ $# -gt 0 ]; do
     case "$1" in
         --step) MODE=step ;;
@@ -47,6 +49,9 @@ countdown() {  # countdown SECONDS LABEL : a filling bar, so the room knows when
         # bash replacement, not tr: tr is byte-based and mangles multi-byte block characters
         full=$(printf '%*s' "$filled" ''); empty=$(printf '%*s' $((24 - filled)) '')
         printf '\r  %s▸ next%s %s  %s%s%s%s%s %ss\e[K' "$G" "$X" "$label" "$G" "${full// /▓}" "$D" "${empty// /░}" "$X" "$(( (steps - i + 3) / 4 ))"
+        if [ "$WATCHFUL" = 1 ] && [ $((i % 4)) = 3 ] && [ "$(probe_ssh)" = blocked ]; then
+            printf '\r\e[K\e[?25h'; CUT=1; caught_ending
+        fi
         sleep 0.25
     done
     printf '\r\e[K\e[?25h'
@@ -143,7 +148,7 @@ caught_ending() {
     for _ in 1 2 3; do printf '\r  %s%s ■ CONNECTION SEVERED ■ %s' "$R$B" $'\e[7m' "$X"; sleep 0.25; printf '\r\e[2K'; sleep 0.15; done
     printf '  %s%s ■ CONNECTION SEVERED ■ %s\n' "$R$B" $'\e[7m' "$X"
     printf '\n  %sThe target answered:%s\n' "$D" "$X"
-    grep -v '^\s*$' "$WORK/out" | grep -v 'NEVER REAL' | head -3 | sed 's/^/  /'
+    [ "$CUT" = 0 ] && grep -v '^\s*$' "$WORK/out" | grep -v 'NEVER REAL' | head -3 | sed 's/^/  /'
     # every decoy now serves the same reveal screen; show it from the web server
     curl -s --max-time 4 "http://$ADMIN/"
     sleep 1
@@ -204,6 +209,7 @@ blocked && caught_ending
 sed 's/\r//g; s/\x1b\[2K//g' "$WORK/out" | grep -E '^/' | head -8 | while read -r p _ code _; do found "$p  ${D}status $code${X}"; done
 
 # ------------------------------------------------------------------ 3 breadcrumb
+WATCHFUL=1
 phase 3 "BREADCRUMB · read robots.txt" "Admins hide things from search engines. That tells us where to look."
 run "fetching robots.txt…" curl -s "http://$ADMIN/robots.txt"
 blocked && caught_ending

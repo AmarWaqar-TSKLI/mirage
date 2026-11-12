@@ -3,8 +3,8 @@
 #
 #   ./demo up               start the whole lab
 #   ./demo reset            clean slate: clear the dashboard, unblock and reconnect every hacker
-#   ./demo observe          Mirage only watches (attackers get all the way in)
-#   ./demo active           Mirage responds on its own (auto-intercept)
+#   ./demo observe          Mirage only watches (attackers get all the way in), then reset
+#   ./demo active           Mirage responds on its own (auto-intercept), then reset
 #
 #   ./demo attack [ARGS]    run the narrated attack on hacker 1 (ARGS go to op: --pause 15, --step, --fast)
 #   ./demo watch            the uplink monitor on hacker 1, for the isolation finale
@@ -39,6 +39,11 @@ reconnect() { connected "$1" || { docker network connect --ip "$(ip_of "$1")" "$
 
 wait_api() { for _ in $(seq 1 40); do curl -sf "$API/health" >/dev/null 2>&1 && return 0; sleep 0.5; done; echo "${R}controller did not come up${X}"; exit 1; }
 mode() { curl -s "$API/api/mode" | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p'; }
+reset() {
+    for k in $(hackers); do reconnect "$k"; docker exec "$(name_of "$k")" pkill -f /usr/local/bin/op >/dev/null 2>&1 || true; done
+    curl -s -X POST "$API/api/admin/reset" >/dev/null
+    say "clean slate: dashboard cleared, every hacker unblocked"
+}
 set_mode() { MIRAGE_RESPONSE_MODE="$1" docker compose up -d controller >/dev/null 2>&1; wait_api; say "Mirage is now in ${B}$(mode)${X} mode"; }
 
 case "${1:-help}" in
@@ -46,12 +51,9 @@ case "${1:-help}" in
         docker info >/dev/null 2>&1 || { echo "${R}Docker is not running:${X} sudo systemctl start docker"; exit 1; }
         say "starting the lab…"; docker compose --profile eval up -d >/dev/null 2>&1; wait_api
         say "lab is up · dashboard ${B}$API/${X} · mode ${B}$(mode)${X}" ;;
-    reset)
-        for k in $(hackers); do reconnect "$k"; docker exec "$(name_of "$k")" pkill -f /usr/local/bin/op >/dev/null 2>&1 || true; done
-        curl -s -X POST "$API/api/admin/reset" >/dev/null
-        say "clean slate: dashboard cleared, every hacker unblocked" ;;
-    observe) set_mode observe ;;
-    active) set_mode active ;;
+    reset) reset ;;
+    observe) set_mode observe; reset ;;
+    active) set_mode active; reset ;;
     hackers)
         n="${2:-3}"; [[ "$n" =~ ^[1-8]$ ]] || { echo "pick 1 to 8"; exit 1; }
         for k in $(seq 2 "$n"); do
@@ -62,7 +64,16 @@ case "${1:-help}" in
         for k in $(hackers); do [ "$k" -gt "$n" ] && { docker rm -f "$(name_of "$k")" >/dev/null; say "hacker $k removed"; }; done
         say "$(hackers | wc -l) hacker(s) in the lab: $(for k in $(hackers); do printf '%s ' "$(ip_of "$k")"; done)" ;;
     hacker) exec docker exec -it "$(name_of "${2:-1}")" bash ;;
-    attack) shift; exec docker exec -it mirage-attacker-1 op "$@" ;;
+    attack)
+        shift
+        # say which mode we are in before the attack starts, so nobody is surprised mid-demo
+        case "$(mode)" in
+            observe) printf '%s● OBSERVE%s Mirage only watches: this attack will get all the way in\n' "$G$B" "$X" ;;
+            active) printf '%s● ACTIVE%s Mirage will intercept this attack\n' "$R$B" "$X" ;;
+            *) printf '%scontroller not answering: ./demo up%s\n' "$R" "$X"; exit 1 ;;
+        esac
+        sleep 2
+        exec docker exec -it mirage-attacker-1 op "$@" ;;
     watch) exec docker exec -it mirage-attacker-1 op watch ;;
     swarm)
         gap="${2:-12}"; extra=$(hackers | grep -v '^1$' || true)

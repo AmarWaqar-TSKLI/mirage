@@ -34,10 +34,9 @@ sudo systemctl start docker
 ## 1 minute before (in S)
 
 ```bash
-./demo observe
-./demo reset
+./demo observe       # switches to watch-only and clears the board
 ```
-Check that the dashboard says **"Airspace clear"** and the top chip says **"Observe only"**.
+Check that the dashboard says **"Airspace clear"** and the top chip says **"Observe only"**. When the Hacker starts the attack, the terminal first prints **● OBSERVE** or **● ACTIVE**. If it says the wrong one, press Ctrl+C and switch modes.
 
 ---
 
@@ -69,8 +68,7 @@ Check that the dashboard says **"Airspace clear"** and the top chip says **"Obse
 ## Switch (0:20, in S)
 
 ```bash
-./demo active
-./demo reset
+./demo active        # switches to auto-intercept and clears the board
 ```
 The chip turns **"Auto-intercept on"** and the dashboard goes back to "Airspace clear". The Hacker types `clear` in H.
 
@@ -88,8 +86,8 @@ Start both within a second or two of each other:
 | Time | Hacker screen | Dashboard | Say |
 |---|---|---|---|
 | 3:00 | Phases tick by with 6 s countdowns | **T-01**, then **T-02**, **T-03** fly in on their own lanes. "Tracking 3 hostiles". | "Three attackers from three machines. Mirage tracks each one separately." |
-| ~3:35 | ★ password, ★ AWS keys | T-01's threat dial passes **75** | "The first one crosses the line…" |
-| ~3:40 | **■ CONNECTION SEVERED ■**, then the big **MIRAGE** screen: *"THIS SYSTEM WAS NEVER REAL"* | **Interceptor** flies from the radar, then **"Threat neutralized"** | "…intercepted automatically. No human pressed anything." |
+| ~3:35 | ★ password, then Phase 5 logs in to the server and reads the AWS keys | T-01's threat dial passes **75** | "The first one crosses the line…" |
+| ~3:40 | In the countdown to Phase 6: **■ CONNECTION SEVERED ■**, then the big **MIRAGE** screen: *"THIS SYSTEM WAS NEVER REAL"* | At the same moment: **interceptor** from the radar, then **"Threat neutralized"** | "…intercepted automatically. No human pressed anything. It never got the keys out." |
 | ~3:50 | Lockout sweep: web, SSH, S3 all **✖ BLOCKED**, then **MISSION FAILED** | Track table: T-01 intercepted, T-02 and T-03 still red | "Everything it took was bait, and it's now blocked everywhere." |
 | ~4:20 | (hacker 1 is done) | T-02, then T-03 are intercepted. The takeover reads **"T-01, T-02, T-03 intercepted"**. | "And the other two, the same way. Three for three." |
 
@@ -128,7 +126,7 @@ Start both within a second or two of each other:
 |---|---|
 | The attack goes straight to MISSION FAILED | still blocked from the last run: `./demo reset` |
 | Every phase says no route | still isolated: `./demo reset` (it reconnects them too) |
-| Act 1 gets intercepted | wrong mode: `./demo observe`, then `./demo reset` |
+| Act 1 gets intercepted (the terminal said **● ACTIVE**) | wrong mode: `./demo observe`, then start the attack again |
 | `swarm` says "no extra hackers" | `./demo hackers 3` |
 | Dashboard says "Reconnecting" | the controller restarted after a mode switch; it reconnects within 3 s |
 | Anything else | `./demo down`, `./demo up`, `./demo hackers 3`, `./demo reset` (about 40 s) |
@@ -138,7 +136,7 @@ Start both within a second or two of each other:
 | Stage (S) | Hacker (H) | Dashboard keys |
 |---|---|---|
 | `./demo up` · `down` · `status` | `./demo attack --pause 12` (slow, to explain) | **G** guide labels |
-| `./demo observe` · `active` | `./demo attack --pause 6` (normal) | **F** follow the track |
-| `./demo reset` | `./demo attack --step` (Enter per phase) | **Esc** close overlays |
+| `./demo observe` · `active` (each also resets) | `./demo attack --pause 6` (normal) | **F** follow the track |
+| `./demo reset` (clean slate, same mode) | `./demo attack --step` (Enter per phase) | **Esc** close overlays |
 | `./demo hackers 3` · `swarm 8` | `./demo watch` (uplink monitor) | **Ctrl + scroll** zoom |
 | `./demo isolate` · `restore` | | **Intercept now** / **Release** |
