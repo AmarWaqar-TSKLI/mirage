@@ -1,6 +1,6 @@
 # Mirage live demo playbook
 
-About **11 minutes**, two people: the **Defender** narrates and drives the dashboard, the **Hacker** owns the attacker terminal. One laptop is enough.
+About **12 minutes**, two people: the **Defender** narrates and drives the dashboard, the **Hacker** owns the attacker terminal. One laptop is enough.
 
 **On stage, nobody copy-pastes anything.** Each act starts with one command, and then the attack runs by itself. Between phases it shows a countdown (`▸ next PHASE 3 … ▓▓▓▓░░░░ 6s`). That countdown is your cue to look at the dashboard and talk.
 
@@ -40,13 +40,24 @@ Check that the dashboard says **"Airspace clear"** and the top chip says **"Obse
 
 ---
 
-## Act 0 · What Mirage is (1:00)
+## Opening · The problem, and proof it's real (2:00)
 
 | Time | Do | Say |
 |---|---|---|
-| 0:00 | Nothing | "This is a company network. These three bases are a website, a server and cloud storage, and **all three are fake.** They're decoys full of planted passwords and keys." |
-| 0:30 | Press **G** on the dashboard | "Top line: what is happening, in one sentence. This strip: the six baits an attacker has to take. The map: where they are. Red is them, green is us." |
-| 0:50 | Press **G** again | "First, Mirage will only **watch**, so you see how far a real attacker gets." |
+| 0:00 | Dashboard on screen, nothing happening | "Attackers who get into a company network usually go unnoticed for weeks. Normal tools look for known bad patterns and drown the team in false alarms. **Mirage turns that around: we fill the network with fake systems that no real employee ever touches.** The moment anyone touches one, it's an attacker, guaranteed." |
+| 0:30 | In **S** (put it on the projector for a moment): `./demo show` | "This isn't a video or a mock-up. Every box here is its own container on one isolated network with no internet: three decoys, Mirage's controller, a real staff website, normal employee traffic, and three hacker machines, each with its own IP." |
+| 1:00 | Point at the dashboard map | "These three bases look like a company website, a deploy server and cloud storage. **All three are fake.** We planted a trail of fake passwords and keys inside them, like breadcrumbs, leading to a fake spreadsheet of passwords: the crown jewel." |
+| 1:20 | Press **G** | "Top line: what's happening, in one sentence. This strip: the six baits, in order. The map: where each attacker is right now. Red is them, green is us." |
+| 1:45 | Press **G** again | "First, Mirage will only **watch**, so you can see how far a real attacker gets." |
+
+### While the attack runs: lines to fill the countdowns
+
+- **Point at the grey `$ …` lines in the hacker terminal:** "These are the real commands it's running: nmap, gobuster, hydra, ssh, the AWS command line. Real tools, real network traffic."
+- "Every decoy reports to Mirage in under a millisecond. That's why the map moves the instant the terminal does."
+- "The red diamond is how air-defence radars mark a hostile aircraft. Each attacker gets a track ID, a trail, and a heading toward its next target."
+- "No real user ever has a reason to read robots.txt or open a backup file. Touching bait is proof of bad intent, so there are no false alarms."
+- "The threat score rises with every bait: at 40 Mirage slows the attacker down, at 75 it blocks it everywhere."
+- "Everything the attacker sees as a win is something we wrote for them."
 
 ---
 
@@ -56,14 +67,14 @@ Check that the dashboard says **"Airspace clear"** and the top chip says **"Obse
 
 | Time | Hacker screen (by itself) | Dashboard | Defender says during the countdown |
 |---|---|---|---|
-| 1:00 | **GHOSTLINE** banner, the objective, "operation starts" countdown | — | "This is the attacker's toolkit. Its goal is the finance spreadsheet." |
-| 1:05 | **Phase 1 · Recon**: 3 machines, 3 open ports | nothing | "A port scan touches no decoy service, so Mirage stays quiet. No false alarms." |
-| 1:20 | **Phase 2 · Enumerate**: `/backup`, `/login`, `/robots.txt` | **T-01 flies in**, "New hostile contact" | "The moment it touches a decoy it becomes a tracked target. Nobody legitimate touches these." |
-| 1:35 | **Phase 3**: `Disallow: /backup/` | chain **1** red, banner "Stage 1 of 6" | "That hint was planted. Bait one." |
-| 1:50 | **Phase 4**: **★ LOOT** SSH password | chain **2**, track turns **amber "Slowed"** | "It stole a password we wrote for it, and Mirage is already slowing it down." |
-| 2:05 | **Phase 5**: hydra fails, then the leaked password works | track flies to the **SSH server**, chain **3** | "It's on a server now. Also fake." |
-| 2:20 | **Phase 6**: **★ LOOT** AWS keys | chain **4** | "Cloud keys, planted." |
-| 2:35 | **Phase 7**: **★ LOOT** passwords.xlsx, **MISSION COMPLETE** | all 6 red, crown jewel **TAKEN** | "Left alone, it takes everything. **Now we switch the defence on, and send three attackers at once.**" |
+| 2:00 | **GHOSTLINE** banner, the objective, "operation starts" countdown | — | "This is the attacker's toolkit. Its goal is the finance spreadsheet." |
+| 2:05 | **Phase 1 · Recon**: 3 machines, 3 open ports | nothing | "A port scan touches no decoy service, so Mirage stays quiet. No false alarms." |
+| 2:20 | **Phase 2 · Enumerate**: `/backup`, `/login`, `/robots.txt` | **T-01 flies in**, "New hostile contact" | "The moment it touches a decoy it becomes a tracked target. Nobody legitimate touches these." |
+| 2:35 | **Phase 3**: `Disallow: /backup/` | chain **1** red, banner "Stage 1 of 6" | "That hint was planted. Bait one." |
+| 2:50 | **Phase 4**: **★ LOOT** SSH password | chain **2**, track turns **amber "Slowed"** | "It stole a password we wrote for it, and Mirage is already slowing it down." |
+| 3:05 | **Phase 5**: hydra fails, then the leaked password works | track flies to the **SSH server**, chain **3** | "It's on a server now. Also fake." |
+| 3:20 | **Phase 6**: **★ LOOT** AWS keys | chain **4** | "Cloud keys, planted." |
+| 3:35 | **Phase 7**: **★ LOOT** passwords.xlsx, **MISSION COMPLETE** | all 6 red, crown jewel **TAKEN** | "Left alone, it takes everything. **Now we switch the defence on, and send three attackers at once.**" |
 
 ## Switch (0:20, in S)
 
@@ -85,11 +96,11 @@ Start both within a second or two of each other:
 
 | Time | Hacker screen | Dashboard | Say |
 |---|---|---|---|
-| 3:00 | Phases tick by with 6 s countdowns | **T-01**, then **T-02**, **T-03** fly in on their own lanes. "Tracking 3 hostiles". | "Three attackers from three machines. Mirage tracks each one separately." |
-| ~3:35 | ★ password, then Phase 5 logs in to the server and reads the AWS keys | T-01's threat dial passes **75** | "The first one crosses the line…" |
-| ~3:40 | In the countdown to Phase 6: **■ CONNECTION SEVERED ■**, then the big **MIRAGE** screen: *"THIS SYSTEM WAS NEVER REAL"* | At the same moment: **interceptor** from the radar, then **"Threat neutralized"** | "…intercepted automatically. No human pressed anything. It never got the keys out." |
-| ~3:50 | Lockout sweep: web, SSH, S3 all **✖ BLOCKED**, then **MISSION FAILED** | Track table: T-01 intercepted, T-02 and T-03 still red | "Everything it took was bait, and it's now blocked everywhere." |
-| ~4:20 | (hacker 1 is done) | T-02, then T-03 are intercepted. The takeover reads **"T-01, T-02, T-03 intercepted"**. | "And the other two, the same way. Three for three." |
+| 4:00 | Phases tick by with 6 s countdowns | **T-01**, then **T-02**, **T-03** fly in on their own lanes. "Tracking 3 hostiles". | "Three attackers from three machines. Mirage tracks each one separately." |
+| ~4:35 | ★ password, then Phase 5 logs in to the server and reads the AWS keys | T-01's threat dial passes **75** | "The first one crosses the line…" |
+| ~4:40 | In the countdown to Phase 6: **■ CONNECTION SEVERED ■**, then the big **MIRAGE** screen: *"THIS SYSTEM WAS NEVER REAL"* | At the same moment: **interceptor** from the radar, then **"Threat neutralized"** | "…intercepted automatically. No human pressed anything. It never got the keys out." |
+| ~4:50 | Lockout sweep: web, SSH, S3 all **✖ BLOCKED**, then **MISSION FAILED** | Track table: T-01 intercepted, T-02 and T-03 still red | "Everything it took was bait, and it's now blocked everywhere." |
+| ~5:20 | (hacker 1 is done) | T-02, then T-03 are intercepted. The takeover reads **"T-01, T-02, T-03 intercepted"**. | "And the other two, the same way. Three for three." |
 
 ---
 
@@ -97,8 +108,8 @@ Start both within a second or two of each other:
 
 | Time | Who | Type | What happens | Say |
 |---|---|---|---|---|
-| 4:40 | Hacker (H) | `./demo watch` | **Uplink monitor**: web, SSH and S3 all **BLOCKED**, ticking every second | "The attacking machines are still on our network, rattling the doors." |
-| 5:00 | Defender (S) | `./demo isolate` | Every line turns **NO ROUTE**, then **■ HOST ISOLATED ■** | "So we do what real security tools do with a compromised machine: isolate it. All three are cut off. Game over." |
+| 5:40 | Hacker (H) | `./demo watch` | **Uplink monitor**: web, SSH and S3 all **BLOCKED**, ticking every second | "The attacking machines are still on our network, rattling the doors." |
+| 6:00 | Defender (S) | `./demo isolate` | Every line turns **NO ROUTE**, then **■ HOST ISOLATED ■** | "So we do what real security tools do with a compromised machine: isolate it. All three are cut off. Game over." |
 
 ---
 
@@ -135,7 +146,7 @@ Start both within a second or two of each other:
 
 | Stage (S) | Hacker (H) | Dashboard keys |
 |---|---|---|
-| `./demo up` · `down` · `status` | `./demo attack --pause 12` (slow, to explain) | **G** guide labels |
+| `./demo up` · `down` · `status` · `show` | `./demo attack --pause 12` (slow, to explain) | **G** guide labels |
 | `./demo observe` · `active` (each also resets) | `./demo attack --pause 6` (normal) | **F** follow the track |
 | `./demo reset` (clean slate, same mode) | `./demo attack --step` (Enter per phase) | **Esc** close overlays |
 | `./demo hackers 3` · `swarm 8` | `./demo watch` (uplink monitor) | **Ctrl + scroll** zoom |

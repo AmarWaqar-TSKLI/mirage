@@ -15,6 +15,7 @@
 #
 #   ./demo isolate [K]      cut hacker K, or every hacker, off the network (host isolation)
 #   ./demo restore          plug every hacker back in
+#   ./demo show             every container in the lab with its role and IP (for the opening)
 #   ./demo status           what is running, which mode, which hackers are connected
 #   ./demo down             stop everything
 set -euo pipefail
@@ -90,6 +91,24 @@ case "${1:-help}" in
             printf '%s■ HOST ISOLATED ■%s %s has no route to anything\n' "$R$B" "$X" "$(ip_of "$k")"
         done ;;
     restore) for k in $(hackers); do reconnect "$k"; done ;;
+    show)
+        # The opening proof: these are separate machines, each with its own address.
+        printf '\n  %s%-24s %-15s %s%s\n' "$B" "CONTAINER" "IP" "ROLE" "$X"
+        docker ps --format '{{.Names}}' | grep '^mirage-' | sort | while read -r c; do
+            ip=$(docker inspect -f "{{with index .NetworkSettings.Networks \"$NET\"}}{{.IPAddress}}{{end}}" "$c")
+            case "$c" in
+                *controller*) role="${G}Mirage · the brain, watches every decoy${X}" ;;
+                *admin-panel*) role="decoy · fake admin website" ;;
+                *ssh*) role="decoy · fake deploy server" ;;
+                *s3*) role="decoy · fake cloud storage" ;;
+                *legit*) role="real staff website (not a decoy)" ;;
+                *benign*) role="normal employee traffic" ;;
+                *attacker*|*hacker*) role="${R}hacker machine${X}" ;;
+                *) role="" ;;
+            esac
+            printf '  %-24s %-15s %s\n' "$c" "${ip:-isolated}" "$role"
+        done
+        printf '\n  %sone isolated network 10.66.0.0/24 · no internet · every box is its own container%s\n\n' "$D" "$X" ;;
     status)
         docker compose --profile eval ps --format '  {{.Name}}  {{.Status}}'
         echo "  mode: $(mode 2>/dev/null || echo '?')"
@@ -97,5 +116,5 @@ case "${1:-help}" in
     down)
         for k in $(hackers); do [ "$k" = 1 ] || docker rm -f "$(name_of "$k")" >/dev/null; done
         docker compose --profile eval down >/dev/null 2>&1; say "lab stopped" ;;
-    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac
