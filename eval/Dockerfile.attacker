@@ -23,7 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY eval/campaign.sh /opt/campaign.sh
 COPY eval/benign.sh /opt/benign.sh
-RUN chmod +x /opt/campaign.sh /opt/benign.sh
+# op: the narrated attack console for live demos (`docker compose exec attacker op`)
+COPY eval/op.sh /usr/local/bin/op
+RUN chmod +x /opt/campaign.sh /opt/benign.sh /usr/local/bin/op
 
 # Stay alive so the harness can `docker compose exec` the scripts on demand.
 CMD ["sleep", "infinity"]
