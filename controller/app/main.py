@@ -99,6 +99,12 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/mode")
+def response_mode(request: Request) -> dict:
+    """Whether Mirage responds on its own (active) or only watches (observe)."""
+    return {"mode": request.app.state.response_engine.mode}
+
+
 # ----------------------------------------------------------------- dashboard
 
 

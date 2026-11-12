@@ -90,6 +90,7 @@ button { font: inherit; color: inherit; }
 .top-mid { display: flex; gap: 8px; }
 .chip { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 10px; background: var(--s2); border: 1px solid var(--line); font-size: 12.5px; color: var(--mute); }
 .chip.clock { color: var(--fg); }
+.chip.warn { color: var(--amber); border-color: rgba(255, 178, 36, .4); }
 .chip.clock i { width: 7px; height: 7px; border-radius: 50%; background: var(--lime); animation: blink 1.6s infinite; }
 .top-right { display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
 .link { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .08em; }
@@ -437,3 +438,98 @@ main { padding: 34px 36px 80px; display: grid; gap: 22px; max-width: 1720px; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
 }
+
+/* ------------------------------------------------------------ attack chain */
+.chain { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; position: relative; }
+.lnk {
+  position: relative; display: grid; grid-template-columns: 34px 1fr; gap: 4px 12px; align-items: center;
+  padding: 14px 16px; border-radius: 16px; background: var(--s1); border: 1px solid var(--line); min-width: 0;
+  transition: background .5s var(--ease), border-color .5s, transform .4s var(--spring);
+}
+.lnk:nth-child(-n+5)::after {   /* arrow into the next bait */
+  content: ""; position: absolute; right: -10px; top: 50%; width: 10px; height: 2px; background: var(--line-2); z-index: 1; transition: background .5s;
+}
+.lnk .n { grid-row: 1 / 3; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font: 600 14px var(--mono); background: var(--s3); color: var(--faint); transition: all .5s var(--ease); }
+.lnk b { font-weight: 500; font-size: 15px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lnk span { font-size: 12.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lnk em { position: absolute; top: 10px; right: 12px; font: normal 11px var(--mono); color: var(--faint); }
+.lnk.taken { background: linear-gradient(160deg, var(--red-soft), var(--s1) 70%); border-color: rgba(255, 74, 61, .35); }
+.lnk.taken .n { background: var(--red); color: #fff; }
+.lnk.taken b { color: var(--fg); }
+.lnk.taken span { color: var(--mute); }
+.lnk.taken em { color: var(--red); }
+.lnk.taken::after { background: var(--red); }
+.lnk.now { border-color: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
+.lnk.now .n { animation: pulse 1.6s infinite; }
+.lnk.next b::after { content: " ← next"; color: var(--red); font: 500 11px var(--mono); }
+.lnk.never { opacity: .55; }
+.lnk.never b { text-decoration: line-through; text-decoration-color: var(--lime); }
+.lnk.never .n { background: transparent; border: 1.5px dashed var(--lime); color: var(--lime); }
+.lnk.never em { color: var(--lime); }
+.lnk.hit { animation: hit .9s var(--spring); }
+@keyframes hit { 0% { transform: scale(.92); } 40% { transform: scale(1.04); } 100% { transform: none; } }
+.chain-wall { position: absolute; top: -6px; bottom: -6px; width: 4px; border-radius: 3px; background: var(--lime); box-shadow: 0 0 18px var(--lime); z-index: 2; animation: wall .6s var(--spring) both; }
+.chain-wall::before { content: "BLOCKED"; position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font: 600 10.5px var(--mono); letter-spacing: .12em; color: var(--lime); white-space: nowrap; }
+@keyframes wall { from { transform: scaleY(0); } }
+
+/* ------------------------------------------------------------ map banner */
+.banner {
+  position: absolute; left: 50%; top: 18px; z-index: 6; transform: translateX(-50%); pointer-events: none;
+  display: grid; justify-items: center; gap: 2px; padding: 12px 26px 13px; border-radius: 16px; text-align: center;
+  background: rgba(10, 11, 10, .9); border: 1px solid rgba(255, 74, 61, .5); backdrop-filter: blur(8px);
+  box-shadow: 0 0 0 1px rgba(255, 74, 61, .15), 0 20px 60px -20px rgba(255, 74, 61, .6);
+  animation: banner 3.2s var(--ease) both;
+}
+.banner.win { border-color: rgba(214, 242, 76, .55); box-shadow: 0 20px 60px -20px rgba(214, 242, 76, .5); }
+.banner-k { font: 600 11px var(--mono); letter-spacing: .16em; color: var(--red); text-transform: uppercase; }
+.banner.win .banner-k { color: var(--lime); }
+.banner b { font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+.banner span:last-child { font-size: 13px; color: var(--mute); }
+@keyframes banner { 0% { opacity: 0; transform: translate(-50%, -14px) scale(.96); } 10%, 82% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -8px); } }
+
+/* ------------------------------------------------------------ intercept takeover */
+.takeover { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(4, 5, 4, .72); backdrop-filter: blur(6px); animation: to-in .45s var(--ease) both; cursor: pointer; overflow: hidden; }
+.takeover.out { animation: to-out .5s var(--ease) forwards; }
+@keyframes to-in { from { opacity: 0; } }
+@keyframes to-out { to { opacity: 0; } }
+.takeover::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(214, 242, 76, .035) 0 1px, transparent 1px 4px); animation: scan 4s linear infinite; }
+@keyframes scan { to { background-position: 0 200px; } }
+.to-ring { position: absolute; width: 240px; height: 240px; border-radius: 50%; border: 2px solid var(--lime); animation: ring 1.6s var(--ease) both; }
+.to-ring.r2 { animation-delay: .25s; }
+@keyframes ring { from { transform: scale(.2); opacity: 1; } to { transform: scale(5); opacity: 0; } }
+.to-card { position: relative; display: grid; justify-items: center; gap: 10px; text-align: center; padding: 0 20px; animation: to-card .7s var(--spring) .1s both; }
+@keyframes to-card { from { opacity: 0; transform: scale(.85); } }
+.to-k { font-size: 12.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--lime); }
+.to-card h2 { margin: 0; font-size: clamp(44px, 7vw, 96px); font-weight: 600; letter-spacing: -.05em; line-height: .95; color: var(--lime); text-shadow: 0 0 40px rgba(214, 242, 76, .35); }
+.to-card p { margin: 6px 0 0; font-size: 20px; color: var(--fg); }
+.to-card p b { font-weight: 600; }
+.to-facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.to-facts span { font: 500 13px var(--mono); padding: 7px 13px; border-radius: 20px; background: var(--lime); color: var(--lime-ink); animation: pop .5s var(--spring) both; }
+.to-facts span:nth-child(2) { animation-delay: .12s; } .to-facts span:nth-child(3) { animation-delay: .24s; } .to-facts span:nth-child(4) { animation-delay: .36s; }
+.to-hint { margin-top: 18px; font-size: 11.5px; color: var(--faint); }
+
+/* ------------------------------------------------------------ guide mode */
+.btn-ghost-sm { height: 40px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--s2); color: var(--fg); cursor: pointer; font-weight: 500; transition: all .2s var(--ease); }
+.btn-ghost-sm:hover { background: var(--s3); }
+.btn-ghost-sm[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+[data-guide] { position: relative; }
+body.guide [data-guide] { outline: 2px dashed rgba(214, 242, 76, .6); outline-offset: 6px; border-radius: var(--r); }
+body.guide [data-guide]::before {
+  content: attr(data-guide); position: absolute; z-index: 15; left: 50%; transform: translateX(-50%); top: -16px; width: max-content; max-width: min(520px, 92%); text-align: center;
+  padding: 7px 12px; border-radius: 10px; background: var(--lime); color: var(--lime-ink); font-size: 13px; font-weight: 500; line-height: 1.35;
+  box-shadow: 0 10px 30px -10px #000; animation: guide-in .4s var(--spring) both; pointer-events: none;
+}
+.hero-text[data-guide]::before { top: -30px; left: 0; transform: none; }
+
+@media (max-width: 1180px) {
+  .chain { grid-template-columns: repeat(3, 1fr); }
+  .lnk::after { display: none; }
+}
+@media (max-width: 800px) {
+  .chain { grid-template-columns: 1fr 1fr; }
+  #guide { display: none; }
+  .banner b { font-size: 17px; }
+}
+
+@keyframes guide-in { from { opacity: 0; transform: translate(-50%, 6px) scale(.9); } }
+.hero-text[data-guide]::before { animation-name: pop; }

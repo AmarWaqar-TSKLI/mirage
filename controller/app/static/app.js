@@ -206,19 +206,79 @@ function upsertAttacker(a) {
   state.attackers.set(a.ip, a);
   const tr = track(a.ip);
   if (state.booted) {
-    if (!prev) { toast("hot", "◆", `New hostile contact ${trackId(a.ip)}`, `${a.ip} touched a decoy. Tracking it now.`); flashEdge(K.red); }
+    if (!prev) { toast("hot", "◆", `New hostile contact ${trackId(a.ip)}`, `${a.ip} touched a decoy. Tracking it now.`); flashEdge(K.red); banner("", "New hostile contact", trackId(a.ip), `${a.ip} just touched a decoy`); }
     if (prev && (a.max_stage || 0) > (prev.max_stage || 0)) {
       const s = STAGES[(a.max_stage || 1) - 1];
       toast("hot", String(a.max_stage), `${trackId(a.ip)} took ${s.bait}`, `Stage ${a.max_stage} of 6 · now at ${PLACE[a.max_stage + 1]}.`);
       flashEdge(K.red); tr.flareAt = performance.now();
+      banner("", `Stage ${a.max_stage} of 6`, STAGE_LINE[a.max_stage] || s.name, `${trackId(a.ip)} · ${a.ip}`);
+      chainHit = a.max_stage;
     }
     if (a.contained_at && !(prev && prev.contained_at)) {
       tr.missileAt = performance.now();
-      setTimeout(() => { toast("win", "✓", `${trackId(a.ip)} intercepted`, `Blocked on every decoy ${fmtDur(tms(a.contained_at) - tms(a.first_seen))} after first contact.`); flashEdge(K.lime); }, RM ? 0 : 1100);
+      setTimeout(() => { toast("win", "✓", `${trackId(a.ip)} intercepted`, `Blocked on every decoy ${fmtDur(tms(a.contained_at) - tms(a.first_seen))} after first contact.`); flashEdge(K.lime); takeover(a); }, RM ? 0 : 1100);
     }
     if (prev && prev.contained_at && !a.contained_at) toast("warn", "↺", `${trackId(a.ip)} released`, "The block was lifted. Mirage is tracking it again.");
   } else if (a.contained_at) tr.missileAt = -1e9;   // already intercepted before the page opened
   dirty.model = dirty.queue = dirty.charts = true;
+}
+
+// ------------------------------------------------------------------ banner + takeover
+const STAGE_LINE = {
+  1: "Took the first bait: robots.txt", 2: "Stole the leaked backup file", 3: "Logged in with the stolen password",
+  4: "Grabbed the planted AWS keys", 5: "Broke into the S3 bucket", 6: "Took the crown jewel",
+};
+let bannerTimer = 0;
+function banner(kind, k, title, sub) {
+  const b = $("banner");
+  b.hidden = true; void b.offsetWidth;
+  b.className = "banner" + (kind === "win" ? " win" : "");
+  $("banner-k").textContent = k; $("banner-t").textContent = title; $("banner-s").textContent = sub;
+  b.hidden = false; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { b.hidden = true; }, 3300);
+}
+let toTimer = 0;
+function takeover(a) {
+  const t = $("takeover"), ttc = tms(a.contained_at) - tms(a.first_seen);
+  const line = $("to-line"); line.replaceChildren(el("b", null, trackId(a.ip)), ` · ${a.ip} was stopped `, el("b", null, fmtDur(ttc)), " after first contact");
+  // every chip comes from Mirage's own record of what it did
+  const r = state.responses.find((x) => x.src_ip === a.ip && x.action === "containment_sequence"), acts = (r && r.details && r.details.actions) || {};
+  const reached = acts.enforcement ? (Array.isArray(acts.enforcement) ? acts.enforcement.length : (acts.enforcement.reached || []).length) : 0;
+  const cut = acts.eviction ? acts.eviction.terminated || 0 : 0, left = 6 - (a.max_stage || 0);
+  const facts = [`stage ${a.max_stage || 0} of 6`, reached ? `blocked on ${reached} decoy${reached === 1 ? "" : "s"}` : "blocked on every decoy"];
+  if (cut) facts.push(`${cut} SSH session${cut === 1 ? "" : "s"} cut`);
+  if (left) facts.push(`${left} bait${left === 1 ? "" : "s"} never reached`);
+  $("to-facts").replaceChildren(...facts.map((f) => el("span", null, f)));
+  t.classList.remove("out"); t.hidden = false;
+  clearTimeout(toTimer); toTimer = setTimeout(closeTakeover, 4800);
+}
+function closeTakeover() { const t = $("takeover"); if (t.hidden) return; t.classList.add("out"); setTimeout(() => { t.hidden = true; t.classList.remove("out"); }, 480); }
+
+// ------------------------------------------------------------------ attack chain
+const CHAIN = [
+  ["robots.txt", "Hint to a hidden folder"], ["Backup file", "Leaks the SSH password"], ["SSH login", "Uses the stolen password"],
+  ["AWS keys", "Planted cloud keys"], ["S3 bucket", "Opened with the stolen keys"], ["passwords.xlsx", "The crown jewel"],
+];
+let chainHit = 0;
+function renderChain() {
+  const a = current(), host = $("chain"), st = a ? a.max_stage || 0 : 0, ft = a ? stageTimes(eventsOf(a.ip)) : {}, t0 = a ? tms(a.first_seen) : 0;
+  host.replaceChildren();
+  CHAIN.forEach(([name, desc], i) => {
+    const n = i + 1, li = el("div", "lnk");
+    if (a && n <= st) li.classList.add("taken");
+    if (a && n === st && !a.contained_at) li.classList.add("now");
+    if (a && n === st + 1 && !a.contained_at) li.classList.add("next");
+    if (a && a.contained_at && n > st) li.classList.add("never");
+    if (n === chainHit) li.classList.add("hit");
+    li.append(el("span", "n", n), el("b", null, name), el("span", null, desc),
+      el("em", null, !a ? "" : n <= st ? (ft[n] ? fmtRel(ft[n] - t0) : "taken") : a.contained_at ? "never" : ""));
+    host.append(li);
+  });
+  if (a && a.contained_at && st < 6) {   // the wall Mirage put up, between the last bait taken and the next
+    const w = el("i", "chain-wall"), items = host.children;
+    requestAnimationFrame(() => { const x = st === 0 ? items[0].offsetLeft - 7 : items[st - 1].offsetLeft + items[st - 1].offsetWidth + 3; w.style.left = x + "px"; });
+    host.append(w);
+  }
+  chainHit = 0;
 }
 
 // ------------------------------------------------------------------ toasts + edge pulse
@@ -688,7 +748,8 @@ function bindMap() {
     if (e.target.closest("input, textarea") || e.metaKey || e.ctrlKey) return;
     if (e.key === "+" || e.key === "=") zoomBy(1.3); else if (e.key === "-") zoomBy(1 / 1.3);
     else if (e.key === "0") resetView(); else if (e.key === "f" || e.key === "F") $("follow").click();
-    else if (e.key === "Escape") { showHover(null); setFollow(false); }
+    else if (e.key === "g" || e.key === "G") $("guide").click();
+    else if (e.key === "Escape") { showHover(null); setFollow(false); closeTakeover(); if (document.body.classList.contains("guide")) $("guide").click(); }
   });
 }
 
@@ -759,7 +820,7 @@ function renderPhases() {
     ["Detected", "Mirage raised the first alert", al ? tms(al.ts) : null],
     ["Took the bait", "Followed the planted breadcrumbs", isFinite(baitT) ? baitT : null],
     ["Slowed down", slow ? "Every request now waits" : "Tarpit at threat 40", slow ? tms(slow.ts) : null],
-    ["Intercepted", "Blocked on every decoy, session cut", a && a.contained_at ? tms(a.contained_at) : null],
+    ["Intercepted", "Blocked on every decoy", a && a.contained_at ? tms(a.contained_at) : null],
   ];
   const fill = el("i", "fill"); host.append(fill);
   let lastDone = -1;
@@ -957,7 +1018,7 @@ function frame(now) {
   try {
     drawMap(now);
     for (const [id, t] of state.fresh) if (now - t > 2500) state.fresh.delete(id);
-    if (dirty.model) { dirty.model = false; renderHero(); renderKpis(); renderLock(); renderPhases(); }
+    if (dirty.model) { dirty.model = false; renderHero(); renderKpis(); renderChain(); renderLock(); renderPhases(); }
     if (dirty.queue && now - lastQueue > 300) { dirty.queue = false; lastQueue = now; renderQueue(); }
     if (dirty.charts && now - lastChart > 500) { dirty.charts = false; renderCharts(now - lastChart > 2500); lastChart = now; }
     const c = new Date().toLocaleTimeString([], { hour12: false });
@@ -1014,13 +1075,37 @@ async function watchReset() {
     t.addEventListener("keydown", (e) => { const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0; if (!d) return; const n = tabs[(i + d + tabs.length) % tabs.length]; selectTab(n); n.focus(); e.preventDefault(); });
   });
   // the rail follows the section in view
-  const io = new IntersectionObserver((entries) => {
-    for (const en of entries) if (en.isIntersecting) document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("on", b.dataset.sec === en.target.id));
-  }, { rootMargin: "-40% 0px -55% 0px" });
-  ["overview", "airspace", "engagement", "queue"].forEach((id) => io.observe($(id)));
+  const SECS = ["overview", "airspace", "engagement", "queue"];
+  let spyLock = 0;
+  const setRail = (id) => document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("on", b.dataset.sec === id));
+  const spy = () => {
+    if (performance.now() < spyLock) return;
+    const root = document.documentElement;
+    let cur = SECS[0];
+    for (const id of SECS) if ($(id).getBoundingClientRect().top <= innerHeight * 0.35) cur = id;
+    if (scrollY < 40) cur = SECS[0];
+    else if (innerHeight + scrollY >= root.scrollHeight - 4) cur = SECS[SECS.length - 1];
+    setRail(cur);
+  };
+  addEventListener("scroll", spy, { passive: true });
+  document.querySelectorAll(".rail-btn, .rail-logo").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    const id = a.dataset.sec || "overview";
+    if (id === "overview") scrollTo({ top: 0, behavior: RM ? "auto" : "smooth" });
+    else $(id).scrollIntoView({ behavior: RM ? "auto" : "smooth", block: "start" });
+    history.replaceState(null, "", "#" + id); setRail(id); spyLock = performance.now() + 900;
+  }));
+  spy();
+  $("guide").addEventListener("click", () => { const on = document.body.classList.toggle("guide"); $("guide").setAttribute("aria-pressed", on); });
+  $("takeover").addEventListener("click", closeTakeover);
   if (document.fonts) document.fonts.ready.then(() => { moveInk(); map.cacheKey = ""; dirty.charts = true; });
   setTimeout(moveInk, 300);
   requestAnimationFrame(frame);
+  fetch("/api/mode").then((r) => r.json()).then((m) => {
+    const observe = m && m.mode === "observe";
+    $("mode-chip").textContent = observe ? "Observe only · no intercept" : "Auto-intercept on";
+    $("mode-chip").classList.toggle("warn", observe);
+  }).catch(() => {});
   loadInitial().catch((e) => console.warn("initial load failed", e)).finally(() => { state.booted = true; dirty.model = dirty.queue = dirty.charts = true; connect(); });
   setInterval(watchReset, 5000);
 })();

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=22" />
+  <link rel="stylesheet" href="/static/style.css?v=23" />
 </head>
 <body data-state="idle">
   <div class="edge" id="edge" aria-hidden="true"></div>
@@ -39,6 +39,7 @@
       <div class="top-right">
         <span class="link mono" id="link-text">Connecting</span>
         <button class="icon-btn" id="bell" type="button" aria-label="Open the alert queue"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg><b id="bell-n" hidden>0</b></button>
+        <button class="btn-ghost-sm" id="guide" type="button" aria-pressed="false" title="Explain every panel (G)">Guide</button>
         <button class="btn-lime" id="check-alerts" type="button">Check alerts</button>
       </div>
     </header>
@@ -46,12 +47,12 @@
     <main>
       <!-- ============================== hero -->
       <section class="hero" id="overview">
-        <div class="hero-text reveal" style="--i:0">
+        <div class="hero-text reveal" style="--i:0" data-guide="1 · What is happening right now, in one sentence">
           <p class="eyebrow mono" id="eyebrow">Deception lab · 3 decoy bases armed</p>
           <h1 class="headline" id="headline"><span class="w">Airspace</span> <em class="w">clear</em></h1>
           <p class="subline" id="subline">No contacts. Every decoy is armed and the radar is sweeping the lab.</p>
         </div>
-        <div class="kpis">
+        <div class="kpis" data-guide="2 · Live counts. Red while an attacker is active, lime once Mirage has stopped it">
           <article class="kpi reveal" style="--i:1">
             <div class="kpi-top"><span class="kpi-ico"><svg viewBox="0 0 24 24"><path d="M12 3 21 12 12 21 3 12z" /></svg></span><span>Hostile tracks</span></div>
             <div class="kpi-val"><b id="k-tracks">0</b><span class="kpi-tag" id="k-tracks-tag">clear</span></div>
@@ -67,9 +68,11 @@
         </div>
       </section>
 
+      <section class="chain reveal" style="--i:4" id="chain" aria-label="Attack chain" data-guide="3 · The six baits an attacker has to take, in order. Red = taken, crossed out = never reached"></section>
+
       <!-- ============================== airspace -->
       <section class="main" id="airspace">
-        <article class="card map-card reveal" style="--i:4">
+        <article class="card map-card reveal" style="--i:4" data-guide="4 · The live map. Each decoy is a base; the red diamond is the attacker moving between them">
           <header class="card-head">
             <div>
               <h2>Airspace</h2>
@@ -90,6 +93,7 @@
           <div class="map-wrap" id="map-wrap">
             <canvas id="map" aria-label="Tactical map of the lab with intruder tracks"></canvas>
             <div class="hovercard" id="hovercard" hidden></div>
+            <div class="banner" id="banner" hidden><span class="banner-k" id="banner-k"></span><b id="banner-t"></b><span id="banner-s"></span></div>
             <div class="map-empty" id="map-empty"><b>Airspace clear</b><span>Waiting for the first contact on any decoy</span></div>
             <ul class="legend mono" aria-label="Map key">
               <li><i class="lg-hostile"></i>Hostile track</li>
@@ -104,7 +108,7 @@
         </article>
 
         <aside class="side">
-          <article class="card lock-card reveal" style="--i:5" id="lock-card">
+          <article class="card lock-card reveal" style="--i:5" id="lock-card" data-guide="5 · The attacker Mirage is watching: how dangerous it is (0–100) and buttons to block or release it">
             <header class="card-head">
               <div><h2>Target lock</h2><p class="card-sub" id="lock-sub">No track locked</p></div>
               <span class="badge" id="lock-badge">Standby</span>
@@ -129,7 +133,7 @@
             </div>
           </article>
 
-          <article class="card tracks-card reveal" style="--i:6">
+          <article class="card tracks-card reveal" style="--i:6" data-guide="6 · Every attacker seen. Click one to follow it">
             <header class="card-head"><div><h2>Track table</h2><p class="card-sub" id="tracks-sub">0 tracks</p></div></header>
             <div class="tracks" id="tracks" role="list"></div>
             <p class="empty" id="tracks-empty">No tracks. Contacts appear here the moment they touch a decoy.</p>
@@ -138,12 +142,12 @@
       </section>
 
       <!-- ============================== engagement -->
-      <section class="card engage reveal" style="--i:7" id="engagement">
+      <section class="card engage reveal" style="--i:7" id="engagement" data-guide="7 · How fast Mirage reacted, from first contact to blocking the attacker">
         <header class="card-head"><div><h2>Engagement</h2><p class="card-sub" id="engage-sub">From first contact to intercept</p></div><span class="badge" id="engage-badge">No engagement</span></header>
         <ol class="phases" id="phases"></ol>
       </section>
 
-      <section class="charts">
+      <section class="charts" data-guide="8 · How busy the attacker was, how deep it got, and which decoy took the most hits">
         <article class="card chart-card reveal" style="--i:8">
           <header class="card-head"><div><h2>Contact volume</h2><p class="card-sub"><b id="vol-total">0</b> events from the locked track</p></div></header>
           <div class="chart" id="vol"></div>
@@ -159,7 +163,7 @@
       </section>
 
       <!-- ============================== queue -->
-      <section class="card queue reveal" style="--i:11" id="queue">
+      <section class="card queue reveal" style="--i:11" id="queue" data-guide="9 · The evidence: every alert, request and command, and what was stolen">
         <header class="card-head">
           <div><h2>Alert queue</h2><p class="card-sub" id="queue-sub">Everything Mirage saw, newest first</p></div>
           <div class="tabs" role="tablist" aria-label="Queue views" id="tabs">
@@ -183,9 +187,19 @@
     </main>
   </div>
 
+  <div class="takeover" id="takeover" hidden role="status" aria-live="assertive">
+    <div class="to-ring"></div><div class="to-ring r2"></div>
+    <div class="to-card">
+      <span class="to-k mono">Mirage · auto-intercept</span>
+      <h2>Threat neutralized</h2>
+      <p id="to-line"></p>
+      <div class="to-facts" id="to-facts"></div>
+      <span class="to-hint mono">click anywhere to close</span>
+    </div>
+  </div>
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="tip" id="tip" hidden></div>
 
-  <script src="/static/app.js?v=22"></script>
+  <script src="/static/app.js?v=23"></script>
 </body>
 </html>
