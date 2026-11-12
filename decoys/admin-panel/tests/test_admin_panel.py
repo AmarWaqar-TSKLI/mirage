@@ -77,6 +77,8 @@ def test_contained_ip_is_refused(client):
     from app import main
     main.enforcement.block("10.66.0.50")
     try:
-        assert client.get("/robots.txt").status_code == 403
+        res = client.get("/robots.txt")
+        assert res.status_code == 403
+        assert "NEVER REAL" in res.text   # the reveal
     finally:
         main.enforcement.clear("10.66.0.50")

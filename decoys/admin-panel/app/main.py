@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from mirage_common import EnforcementState, Event, EventClient, EventType, Registry, Source, start_control_server
+from mirage_common.reveal import caught
 
 from . import pages
 
@@ -62,7 +63,11 @@ async def report(request: Request, call_next):
     ip = request.client.host if request.client else ""
     # Containment: a blocked IP is refused outright; a tarpitted one is slowed.
     if enforcement.is_blocked(ip):
-        return PlainTextResponse("", status_code=403, headers={"Server": SERVER_HEADER})
+        # The reveal: terminal tools get it in colour, browsers as plain text.
+        agent = request.headers.get("user-agent", "").lower()
+        color = agent.startswith(("curl/", "wget/", "gobuster", "mozilla/5.0 (hydra"))
+        return PlainTextResponse(caught(ip, [("refused", f"{request.method} {request.url.path}")], color=color),
+                                 status_code=403, headers={"Server": SERVER_HEADER})
     delay = enforcement.tarpit_delay(ip)
     if delay:
         await asyncio.sleep(delay)

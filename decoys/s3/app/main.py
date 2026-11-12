@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Request, Response, status
 from mirage_common import EnforcementState, Registry, start_control_server
+from mirage_common.reveal import S3_MESSAGE
 
 from .auth import S3Authenticator
 from .reporting import S3Reporter
@@ -69,7 +70,7 @@ app = FastAPI(title="Mirage S3 Decoy", lifespan=lifespan, docs_url=None, redoc_u
 async def enforce(request: Request, call_next):
     ip = request.client.host if request.client else ""
     if enforcement.is_blocked(ip):
-        return Response(content=xml_error("AccessDenied", "Access Denied", request.url.path),
+        return Response(content=xml_error("AccessDenied", S3_MESSAGE, request.url.path),
                         status_code=status.HTTP_403_FORBIDDEN, media_type="application/xml",
                         headers={"Server": SERVER_HEADER})
     delay = enforcement.tarpit_delay(ip)

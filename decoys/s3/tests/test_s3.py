@@ -124,6 +124,8 @@ def test_contained_ip_is_refused(client):
     from app.main import enforcement
     enforcement.block("10.66.0.50")
     try:
-        assert client.get("/").status_code == 403
+        res = client.get("/")
+        assert res.status_code == 403
+        assert "Contained by Mirage" in res.text
     finally:
         enforcement.clear("10.66.0.50")

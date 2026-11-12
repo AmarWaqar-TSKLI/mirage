@@ -20,6 +20,7 @@ import paramiko
 
 from mirage_common import Event, EventClient, EventType, Registry, Source
 from mirage_common import EnforcementState, start_control_server
+from mirage_common.reveal import caught
 
 from .classify import classify
 from .fs import AWS_CREDENTIALS, FileSystem
@@ -133,6 +134,8 @@ class Connection(paramiko.ServerInterface):
         self.transport: paramiko.Transport | None = None
         self.channel: paramiko.Channel | None = None
         self.recorder: Recorder | None = None
+        self.commands: list[str] = []      # what this session ran, for the reveal on containment
+        self.started: float | None = None
 
     # ------------------------------------------------------------- reporting
 
@@ -178,6 +181,13 @@ class Connection(paramiko.ServerInterface):
                              "key_type": key.get_name(), "fingerprint": key.fingerprint})
         return paramiko.AUTH_FAILED
 
+    def get_banner(self):
+        # A contained intruder who tries to come back is shown the reveal before
+        # the password prompt. OpenSSH prints banners as plain text, so no colour.
+        if self.decoy.enforcement.is_blocked(self.ip):
+            return caught(self.ip, [("login", "refused, even with the right password")], color=False), "en-US"
+        return None, None
+
     def check_channel_request(self, kind, chanid):
         if kind == "session":
             return paramiko.OPEN_SUCCEEDED
@@ -219,7 +229,7 @@ class Connection(paramiko.ServerInterface):
 
     def _session(self, channel: paramiko.Channel) -> None:
         self.channel = channel
-        started = time.monotonic()
+        started = self.started = time.monotonic()
         shell = Shell(self.decoy.base_fs.copy(), peer=(self.ip, self.port))
         self.recorder = Recorder(
             self.decoy.data_dir / "sessions" / f"{self.session_id}.jsonl",
@@ -308,6 +318,7 @@ class Connection(paramiko.ServerInterface):
             time.sleep(delay)
         output = shell.run(line)
         if line.strip():
+            self.commands.append(line.strip())
             if self.recorder:  # may already be closed if containment kicked the session
                 self.recorder.record("input", line)
                 self.recorder.record("output", output)
@@ -318,11 +329,20 @@ class Connection(paramiko.ServerInterface):
                             details={"command": line})
         return output.replace("\n", "\r\n")
 
-    def notify_and_kick(self, notice: str = "*** UNAUTHORIZED ACTIVITY DETECTED. ACCESS TERMINATED. ***\r\n") -> None:
-        """Inform the intruder they have been detected and instantly terminate the connection."""
+    def notify_and_kick(self, notice: str | None = None) -> None:
+        """Show the intruder the reveal (what Mirage saw them do), then cut the connection."""
+        if notice is None:
+            facts = []
+            if self.started is not None:
+                facts.append(("time inside", f"{time.monotonic() - self.started:.1f} s on this server"))
+            if self.commands:
+                shown = "; ".join(self.commands[-3:])
+                facts.append(("you ran", shown if len(shown) <= 46 else shown[:45] + "…"))
+                facts.append(("recorded", f"{len(self.commands)} command{'s' if len(self.commands) != 1 else ''}"))
+            notice = caught(self.ip, facts)
         try:
             if self.channel and self.channel.active:
-                self.channel.sendall(f"\r\n\x1b[31;1m{notice}\x1b[0m\r\n")
+                self.channel.sendall(notice.replace("\n", "\r\n") + "\r\n")
                 time.sleep(0.3)
         except Exception:
             pass
