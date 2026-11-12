@@ -3,6 +3,7 @@
 #
 #   op          guided: press Enter to launch each phase
 #   op --auto   run every phase back to back
+#   op watch    live uplink monitor: can this machine still reach each target?
 #
 # Walks the same breadcrumb trail as campaign.sh with the same real tools
 # (nmap, gobuster, hydra, curl, ssh, aws), but narrates it: what each tool
@@ -67,6 +68,46 @@ blocked() {    # true if the last output is Mirage's reveal
     grep -q -e "NEVER REAL" -e "Contained by Mirage" "$WORK/out" 2>/dev/null
 }
 
+# ------------------------------------------------------------------ uplink monitor
+# Probes each target once a second and redraws one line per target:
+#   open     the service answers normally
+#   BLOCKED  it answers, but refuses us (Mirage containment)
+#   NO ROUTE nothing answers at all: the machine itself has been cut off
+probe_http() { curl -s -o /dev/null -w '%{http_code}' --max-time 1 "$1" 2>/dev/null; }
+probe_ssh() {  # asks for the login banner only: no password is sent, so no login event is logged
+    local out; out=$(timeout 3 ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=1 -o PreferredAuthentications=keyboard-interactive "deploy@$SSH_HOST" true 2>&1)
+    case "$out" in *"NEVER REAL"*) echo blocked ;; *"Permission denied"*) echo open ;; *) echo none ;; esac
+}
+state_of() {   # http code or ssh word -> coloured status
+    case "$1" in
+        403|blocked) printf '%s██████████ BLOCKED%s ' "$R" "$X" ;;
+        000|none|"") printf '%s·········· NO ROUTE%s' "$D" "$X" ;;
+        *) printf '%s██████████ open%s     ' "$G" "$X" ;;
+    esac
+}
+watch_uplink() {
+    clear 2>/dev/null; printf '\e[?25l'
+    printf '\n  %sUPLINK MONITOR%s  %s%s · probing every second · Ctrl+C to stop%s\n\n' "$W$B" "$X" "$D" "$(hostname -I 2>/dev/null | awk '{print $1}')" "$X"
+    local n=0 web ssh s3
+    while :; do
+        web=$(probe_http "http://$ADMIN/"); s3=$(probe_http "http://$S3:$S3_PORT/"); ssh=$(probe_ssh)
+        printf '\e[4;1H'
+        printf '  %-28s %s\e[K\n' "web    $ADMIN:80" "$(state_of "$web")"
+        printf '  %-28s %s\e[K\n' "ssh    $SSH_HOST:22" "$(state_of "$ssh")"
+        printf '  %-28s %s\e[K\n' "s3     $S3:$S3_PORT" "$(state_of "$s3")"
+        printf '\n  %s%s%s\e[K\n' "$D" "$(date +%H:%M:%S) · check $((++n))" "$X"
+        if [ "$web" = 000 ] && [ "$s3" = 000 ] && [ "$ssh" = none ]; then
+            sleep 0.4
+            for _ in 1 2 3; do printf '\r  %s%s ■ HOST ISOLATED ■ %s\e[K' "$R$B" $'\e[7m' "$X"; sleep 0.3; printf '\r\e[K'; sleep 0.2; done
+            box "$R" "${R}${B}■ HOST ISOLATED ■${X}" "This machine has been cut off from the network." "No route to any system. The operation is over."
+            printf '\e[?25h\n'; exit 0
+        fi
+        sleep 1
+    done
+}
+[ "${1:-}" = "watch" ] && watch_uplink
+
 # ------------------------------------------------------------------ endings
 caught_ending() {
     local t; t=$(elapsed)
@@ -83,9 +124,7 @@ caught_ending() {
     local web ssh s3
     web=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "http://$ADMIN/")
     printf '  %-34s %s\n' "web   http://$ADMIN" "$([ "$web" = 403 ] && echo "${R}✖ BLOCKED ($web)$X" || echo "${G}open ($web)$X")"; sleep 0.35
-    if sshpass -p "x" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=4 \
-         -o PreferredAuthentications=password -o PubkeyAuthentication=no "deploy@$SSH_HOST" true 2>&1 | grep -q "NEVER REAL"; then
-        ssh="${R}✖ BLOCKED (login refused)$X"; else ssh="${Y}no answer$X"; fi
+    if [ "$(probe_ssh)" = blocked ]; then ssh="${R}✖ BLOCKED (login refused)$X"; else ssh="${Y}no answer$X"; fi
     printf '  %-34s %s\n' "ssh   deploy@$SSH_HOST" "$ssh"; sleep 0.35
     s3=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "http://$S3:$S3_PORT/")
     printf '  %-34s %s\n' "s3    http://$S3:$S3_PORT" "$([ "$s3" = 403 ] && echo "${R}✖ BLOCKED ($s3)$X" || echo "${G}open ($s3)$X")"; sleep 0.35
@@ -99,6 +138,7 @@ win_ending() {
     printf '\n  %s(Mirage was in observe mode: it watched every step and let it happen.)%s\n\n' "$D" "$X"
     exit 0
 }
+
 
 # ------------------------------------------------------------------ boot
 clear 2>/dev/null
