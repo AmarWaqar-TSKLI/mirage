@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Stage helper for the live demo. Run from the repo root on the host.
+#
+#   ./demo up         start the whole lab and open-check the dashboard
+#   ./demo reset      clean slate: clear the dashboard, unblock and reconnect the attacker
+#   ./demo observe    Mirage only watches (the attacker gets all the way in)
+#   ./demo active     Mirage responds on its own (auto-intercept)
+#   ./demo hacker     open a shell on the attacker machine (10.66.0.50)
+#   ./demo isolate    cut the attacker machine off the network (host isolation)
+#   ./demo restore    plug it back in
+#   ./demo status     what is running, which mode, is the attacker connected
+#   ./demo down       stop everything
+set -euo pipefail
+cd "$(dirname "$0")"
+
+API=http://127.0.0.1:8000
+ATTACKER=mirage-attacker-1
+NET=mirage_lab
+G=$'\e[38;5;191m' R=$'\e[38;5;203m' D=$'\e[2m' B=$'\e[1m' X=$'\e[0m'
+say() { printf '%s▸%s %s\n' "$G" "$X" "$*"; }
+
+wait_api() { for _ in $(seq 1 40); do curl -sf "$API/health" >/dev/null 2>&1 && return 0; sleep 0.5; done; echo "${R}controller did not come up${X}"; exit 1; }
+connected() { docker inspect -f '{{json .NetworkSettings.Networks}}' "$ATTACKER" 2>/dev/null | grep -q "\"$NET\""; }
+mode() { curl -s "$API/api/mode" | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p'; }
+set_mode() {
+    MIRAGE_RESPONSE_MODE="$1" docker compose up -d controller >/dev/null 2>&1
+    wait_api; say "Mirage is now in ${B}$(mode)${X} mode"
+}
+
+case "${1:-help}" in
+    up)
+        docker info >/dev/null 2>&1 || { echo "${R}Docker is not running:${X} sudo systemctl start docker"; exit 1; }
+        say "starting the lab…"
+        docker compose --profile eval up -d >/dev/null 2>&1
+        wait_api
+        say "lab is up · dashboard ${B}$API/${X} · mode ${B}$(mode)${X}" ;;
+    reset)
+        connected || { docker network connect --ip 10.66.0.50 "$NET" "$ATTACKER"; say "attacker reconnected"; }
+        curl -s -X POST "$API/api/admin/reset" >/dev/null
+        say "clean slate: dashboard cleared, attacker unblocked" ;;
+    observe) set_mode observe ;;
+    active) set_mode active ;;
+    hacker) exec docker exec -it "$ATTACKER" bash ;;
+    isolate)
+        connected || { say "already isolated"; exit 0; }
+        say "isolating 10.66.0.50 from the network…"
+        docker network disconnect "$NET" "$ATTACKER"
+        printf '%s■ HOST ISOLATED ■%s the attacker machine has no route to anything\n' "$R$B" "$X" ;;
+    restore)
+        connected && { say "attacker is already connected"; exit 0; }
+        docker network connect --ip 10.66.0.50 "$NET" "$ATTACKER"; say "attacker reconnected at 10.66.0.50" ;;
+    status)
+        docker compose --profile eval ps --format '  {{.Name}}  {{.Status}}'
+        echo "  mode: $(mode 2>/dev/null || echo '?')  ·  attacker: $(connected && echo connected || echo ISOLATED)" ;;
+    down) docker compose --profile eval down >/dev/null 2>&1; say "lab stopped" ;;
+    *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac
