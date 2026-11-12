@@ -228,18 +228,36 @@ const STAGE_LINE = {
   1: "Took the first bait: robots.txt", 2: "Stole the leaked backup file", 3: "Logged in with the stolen password",
   4: "Grabbed the planted AWS keys", 5: "Broke into the S3 bucket", 6: "Took the crown jewel",
 };
-let bannerTimer = 0;
+// With several hackers, banners arrive in bursts: queue them so each one is
+// readable (2.2 s each), and drop the oldest if the queue backs up.
+const bannerQueue = [];
+let bannerBusy = false;
 function banner(kind, k, title, sub) {
-  const b = $("banner");
+  bannerQueue.push([kind, k, title, sub]);
+  if (bannerQueue.length > 3) bannerQueue.shift();
+  if (!bannerBusy) nextBanner();
+}
+function nextBanner() {
+  const item = bannerQueue.shift(), b = $("banner");
+  if (!item) { bannerBusy = false; b.hidden = true; return; }
+  bannerBusy = true;
+  const [kind, k, title, sub] = item, quick = bannerQueue.length > 0;
   b.hidden = true; void b.offsetWidth;
   b.className = "banner" + (kind === "win" ? " win" : "");
+  b.style.animationDuration = quick ? "2.2s" : "3.2s";
   $("banner-k").textContent = k; $("banner-t").textContent = title; $("banner-s").textContent = sub;
-  b.hidden = false; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { b.hidden = true; }, 3300);
+  b.hidden = false;
+  setTimeout(nextBanner, quick ? 2200 : 3300);
 }
 let toTimer = 0;
+const takenDown = [];   // tracks intercepted while the takeover is on screen
 function takeover(a) {
   const t = $("takeover"), ttc = tms(a.contained_at) - tms(a.first_seen);
-  const line = $("to-line"); line.replaceChildren(el("b", null, trackId(a.ip)), ` · ${a.ip} was stopped `, el("b", null, fmtDur(ttc)), " after first contact");
+  if (t.hidden) takenDown.length = 0;
+  if (!takenDown.includes(a.ip)) takenDown.push(a.ip);
+  const line = $("to-line");
+  if (takenDown.length === 1) line.replaceChildren(el("b", null, trackId(a.ip)), ` · ${a.ip} was stopped `, el("b", null, fmtDur(ttc)), " after first contact");
+  else line.replaceChildren(el("b", null, takenDown.map(trackId).join(", ")), ` intercepted · latest ${trackId(a.ip)} in `, el("b", null, fmtDur(ttc)));
   // every chip comes from Mirage's own record of what it did
   const r = state.responses.find((x) => x.src_ip === a.ip && x.action === "containment_sequence"), acts = (r && r.details && r.details.actions) || {};
   const reached = acts.enforcement ? (Array.isArray(acts.enforcement) ? acts.enforcement.length : (acts.enforcement.reached || []).length) : 0;
@@ -357,10 +375,11 @@ function renderKpis() {
   $("k-tracks").closest(".kpi").classList.toggle("alarm", live.length > 0);
   countTo("k-alerts", state.alerts.length);
   $("k-alerts-tag").textContent = `${state.alerts.filter((x) => x.severity === "critical" || x.severity === "high").length} high or critical`;
-  const ttc = a && a.contained_at ? tms(a.contained_at) - tms(a.first_seen) : null;
+  const lastC = list.filter((x) => x.contained_at).sort((p, q) => tms(q.contained_at) - tms(p.contained_at))[0];
+  const ttc = lastC ? tms(lastC.contained_at) - tms(lastC.first_seen) : null;
   if (ttc == null) { $("k-ttc").textContent = "—"; counters.delete("k-ttc"); }
   else countTo("k-ttc", ttc, (v) => (v < 1000 ? Math.round(v) + "ms" : (v / 1000).toFixed(v < 10000 ? 2 : 1) + "s"));
-  $("k-ttc-tag").textContent = ttc == null ? "no intercept" : `stage ${a.max_stage || 0} of 6`;
+  $("k-ttc-tag").textContent = ttc == null ? "no intercept" : `${trackId(lastC.ip)} · stage ${lastC.max_stage || 0} of 6`;
   const bn = $("bell-n"); bn.hidden = !state.alerts.length; bn.textContent = state.alerts.length > 99 ? "99+" : state.alerts.length;
 }
 
@@ -375,8 +394,8 @@ const map = {
 function track(ip) {
   let t = map.tracks.get(ip);
   if (!t) {
-    const u = (() => { let h = 2166136261; for (const ch of ip) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; })();
-    t = { pos: 0, off: (u - 0.5) * 30, hist: [], histAt: 0, sweptAt: 0, lockAt: 0, flareAt: 0, missileAt: 0 };
+    const lane = map.tracks.size, off = lane === 0 ? 0 : Math.ceil(lane / 2) * 24 * (lane % 2 ? 1 : -1);
+    t = { pos: 0, off, hist: [], histAt: 0, sweptAt: 0, lockAt: 0, flareAt: 0, missileAt: 0 };
     map.tracks.set(ip, t);
   }
   return t;
@@ -553,7 +572,7 @@ function drawMap(now) {
     label(g, STATION.name, sx, sy - 22, rgba(K.lime, 1), 13, 600); label(g, `${STATION.ip} · CONTROLLER`, sx, sy + 28, rgba(K.mute, .9), 10, 500); }
 
   // tracks
-  const hits = [];
+  const hits = [], blocks = [];
   for (const a of [...attackers].reverse()) {
     const t = track(a.ip), st = a.max_stage || 0, contained = !!a.contained_at, isSel = sel && sel.ip === a.ip;
     const target = st + 1;
@@ -635,7 +654,10 @@ function drawMap(now) {
       g.stroke();
     }
     // data block with a leader line
-    const right = px < W - 210, bx = px + (right ? 34 : -34), by = py - 42, bw = 156, bh = 54, x0 = right ? bx : bx - bw;
+    const right = px < W - 210, bx = px + (right ? 34 : -34), bw = 156, bh = 54, x0 = right ? bx : bx - bw;
+    let by = py - 42;
+    for (let guard = 0; guard < 8 && blocks.some((r) => x0 < r.x + r.w + 6 && x0 + bw + 6 > r.x && by < r.y + r.h + 6 && by + bh + 6 > r.y); guard++) by += bh + 8;
+    blocks.push({ x: x0, y: by, w: bw, h: bh });
     g.strokeStyle = rgba(col, .7); g.lineWidth = 1; g.beginPath(); g.moveTo(px + (right ? 12 : -12), py - 10); g.lineTo(right ? x0 : x0 + bw, by + bh - 6); g.stroke();
     g.fillStyle = "rgba(10,11,10,.88)"; g.beginPath(); g.roundRect(x0, by, bw, bh, 8); g.fill();
     g.fillStyle = rgba(col, 1); g.fillRect(x0, by + 8, 2, bh - 16);
