@@ -1,57 +1,90 @@
 #!/usr/bin/env bash
 # Stage helper for the live demo. Run from the repo root on the host.
 #
-#   ./demo up         start the whole lab and open-check the dashboard
-#   ./demo reset      clean slate: clear the dashboard, unblock and reconnect the attacker
-#   ./demo observe    Mirage only watches (the attacker gets all the way in)
-#   ./demo active     Mirage responds on its own (auto-intercept)
-#   ./demo hacker     open a shell on the attacker machine (10.66.0.50)
-#   ./demo isolate    cut the attacker machine off the network (host isolation)
-#   ./demo restore    plug it back in
-#   ./demo status     what is running, which mode, is the attacker connected
-#   ./demo down       stop everything
+#   ./demo up               start the whole lab
+#   ./demo reset            clean slate: clear the dashboard, unblock and reconnect every hacker
+#   ./demo observe          Mirage only watches (attackers get all the way in)
+#   ./demo active           Mirage responds on its own (auto-intercept)
+#
+#   ./demo attack [ARGS]    run the narrated attack on hacker 1 (ARGS go to op: --pause 15, --step, --fast)
+#   ./demo watch            the uplink monitor on hacker 1, for the isolation finale
+#
+#   ./demo hackers N        have N hacker machines in the lab (1 to 8, at 10.66.0.50, .52, .53 …)
+#   ./demo hacker [K]       open a shell on hacker K (default 1)
+#   ./demo swarm [SECS]     launch op on every extra hacker in the background, SECS apart (default 12)
+#
+#   ./demo isolate [K]      cut hacker K, or every hacker, off the network (host isolation)
+#   ./demo restore          plug every hacker back in
+#   ./demo status           what is running, which mode, which hackers are connected
+#   ./demo down             stop everything
 set -euo pipefail
 cd "$(dirname "$0")"
 
 API=http://127.0.0.1:8000
-ATTACKER=mirage-attacker-1
 NET=mirage_lab
+IMAGE=mirage-attacker
 G=$'\e[38;5;191m' R=$'\e[38;5;203m' D=$'\e[2m' B=$'\e[1m' X=$'\e[0m'
 say() { printf '%s▸%s %s\n' "$G" "$X" "$*"; }
 
-wait_api() { for _ in $(seq 1 40); do curl -sf "$API/health" >/dev/null 2>&1 && return 0; sleep 0.5; done; echo "${R}controller did not come up${X}"; exit 1; }
-connected() { docker inspect -f '{{json .NetworkSettings.Networks}}' "$ATTACKER" 2>/dev/null | grep -q "\"$NET\""; }
-mode() { curl -s "$API/api/mode" | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p'; }
-set_mode() {
-    MIRAGE_RESPONSE_MODE="$1" docker compose up -d controller >/dev/null 2>&1
-    wait_api; say "Mirage is now in ${B}$(mode)${X} mode"
+# Hacker 1 is the compose attacker at 10.66.0.50. Hackers 2..8 are extra copies
+# of the same image at 10.66.0.52..58 (10.66.0.51 is the benign user).
+name_of() { [ "$1" = 1 ] && echo mirage-attacker-1 || echo "mirage-hacker-$1"; }
+ip_of() { [ "$1" = 1 ] && echo 10.66.0.50 || echo "10.66.0.5$1"; }
+hackers() {   # numbers of the hacker machines that exist
+    docker ps -a --format '{{.Names}}' | grep -q '^mirage-attacker-1$' && echo 1
+    docker ps -a --filter label=mirage.hacker --format '{{.Names}}' | sed 's/mirage-hacker-//' | sort -n
 }
+connected() { docker inspect -f '{{json .NetworkSettings.Networks}}' "$(name_of "$1")" 2>/dev/null | grep -q "\"$NET\""; }
+reconnect() { connected "$1" || { docker network connect --ip "$(ip_of "$1")" "$NET" "$(name_of "$1")"; say "hacker $1 reconnected at $(ip_of "$1")"; }; }
+
+wait_api() { for _ in $(seq 1 40); do curl -sf "$API/health" >/dev/null 2>&1 && return 0; sleep 0.5; done; echo "${R}controller did not come up${X}"; exit 1; }
+mode() { curl -s "$API/api/mode" | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p'; }
+set_mode() { MIRAGE_RESPONSE_MODE="$1" docker compose up -d controller >/dev/null 2>&1; wait_api; say "Mirage is now in ${B}$(mode)${X} mode"; }
 
 case "${1:-help}" in
     up)
         docker info >/dev/null 2>&1 || { echo "${R}Docker is not running:${X} sudo systemctl start docker"; exit 1; }
-        say "starting the lab…"
-        docker compose --profile eval up -d >/dev/null 2>&1
-        wait_api
+        say "starting the lab…"; docker compose --profile eval up -d >/dev/null 2>&1; wait_api
         say "lab is up · dashboard ${B}$API/${X} · mode ${B}$(mode)${X}" ;;
     reset)
-        connected || { docker network connect --ip 10.66.0.50 "$NET" "$ATTACKER"; say "attacker reconnected"; }
+        for k in $(hackers); do reconnect "$k"; docker exec "$(name_of "$k")" pkill -f /usr/local/bin/op >/dev/null 2>&1 || true; done
         curl -s -X POST "$API/api/admin/reset" >/dev/null
-        say "clean slate: dashboard cleared, attacker unblocked" ;;
+        say "clean slate: dashboard cleared, every hacker unblocked" ;;
     observe) set_mode observe ;;
     active) set_mode active ;;
-    hacker) exec docker exec -it "$ATTACKER" bash ;;
+    hackers)
+        n="${2:-3}"; [[ "$n" =~ ^[1-8]$ ]] || { echo "pick 1 to 8"; exit 1; }
+        for k in $(seq 2 "$n"); do
+            docker ps -a --format '{{.Names}}' | grep -q "^$(name_of "$k")$" && continue
+            docker run -d --name "$(name_of "$k")" --label mirage.hacker=1 --network "$NET" --ip "$(ip_of "$k")" "$IMAGE" >/dev/null
+            say "hacker $k is up at $(ip_of "$k")"
+        done
+        for k in $(hackers); do [ "$k" -gt "$n" ] && { docker rm -f "$(name_of "$k")" >/dev/null; say "hacker $k removed"; }; done
+        say "$(hackers | wc -l) hacker(s) in the lab: $(for k in $(hackers); do printf '%s ' "$(ip_of "$k")"; done)" ;;
+    hacker) exec docker exec -it "$(name_of "${2:-1}")" bash ;;
+    attack) shift; exec docker exec -it mirage-attacker-1 op "$@" ;;
+    watch) exec docker exec -it mirage-attacker-1 op watch ;;
+    swarm)
+        gap="${2:-12}"; extra=$(hackers | grep -v '^1$' || true)
+        [ -n "$extra" ] || { echo "no extra hackers yet: ./demo hackers 3"; exit 1; }
+        for k in $extra; do
+            docker exec -d "$(name_of "$k")" bash -c "op --pause 6 > /tmp/op.log 2>&1"
+            say "hacker $k ($(ip_of "$k")) launched"
+            [ "$k" = "$(echo "$extra" | tail -1)" ] || sleep "$gap"
+        done ;;
     isolate)
-        connected || { say "already isolated"; exit 0; }
-        say "isolating 10.66.0.50 from the network…"
-        docker network disconnect "$NET" "$ATTACKER"
-        printf '%s■ HOST ISOLATED ■%s the attacker machine has no route to anything\n' "$R$B" "$X" ;;
-    restore)
-        connected && { say "attacker is already connected"; exit 0; }
-        docker network connect --ip 10.66.0.50 "$NET" "$ATTACKER"; say "attacker reconnected at 10.66.0.50" ;;
+        for k in ${2:-$(hackers)}; do
+            connected "$k" || { say "hacker $k is already isolated"; continue; }
+            docker network disconnect "$NET" "$(name_of "$k")"
+            printf '%s■ HOST ISOLATED ■%s %s has no route to anything\n' "$R$B" "$X" "$(ip_of "$k")"
+        done ;;
+    restore) for k in $(hackers); do reconnect "$k"; done ;;
     status)
         docker compose --profile eval ps --format '  {{.Name}}  {{.Status}}'
-        echo "  mode: $(mode 2>/dev/null || echo '?')  ·  attacker: $(connected && echo connected || echo ISOLATED)" ;;
-    down) docker compose --profile eval down >/dev/null 2>&1; say "lab stopped" ;;
-    *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+        echo "  mode: $(mode 2>/dev/null || echo '?')"
+        for k in $(hackers); do echo "  hacker $k  $(ip_of "$k")  $(connected "$k" && echo connected || echo ISOLATED)"; done ;;
+    down)
+        for k in $(hackers); do [ "$k" = 1 ] || docker rm -f "$(name_of "$k")" >/dev/null; done
+        docker compose --profile eval down >/dev/null 2>&1; say "lab stopped" ;;
+    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac
