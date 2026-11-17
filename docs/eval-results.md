@@ -1,5 +1,28 @@
 # Evaluation results
 
+## Latest run: 17 November 2026 (current code)
+
+Run with `eval/run.sh 5 <mode>` in the Docker lab: 5 measured campaigns per mode
+after one discarded warmup, 40 benign requests per run (400 across both modes).
+
+| Metric | Observe mode | Active mode |
+|---|---|---|
+| Time to detect (first event → first alert) | 0.007 s mean, 0.023 s worst | under 1 ms in every run |
+| Time to contain (first event → blocked everywhere) | n/a (response off) | 2.63 s ± 0.69 |
+| Trail stage reached | 6 / 6 in every run | 4 / 6 in every run |
+| ATT&CK coverage (reference techniques seen) | 1.00 | 0.78 (attack stopped early) |
+| False-positive alerts | 0 | 0 |
+
+With response on, the attacker is now contained at stage 4 (reading the planted
+AWS keys) in every run, so it never reaches the S3 bucket or the bait file.
+Compared with the 6 November run, containment now takes longer (2.6 s vs 1.3 s)
+and lands one stage later (4 vs about 3). The cause of that shift has not been
+investigated yet.
+
+The 6 November results below are kept for reference.
+
+## Earlier run: 6 November 2026
+
 Run 2026-11-06 in the Docker lab (`eval/run.sh 5 <mode>`), 5 measured campaigns
 per mode after one discarded warmup, 40 benign requests per run. Full scripted
 campaign: nmap, gobuster, hydra, sshpass SSH login, recon, `aws s3 ls/cp`, bait
