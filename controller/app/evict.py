@@ -5,6 +5,8 @@ import os
 from typing import Any, Dict, List, Optional
 import httpx
 
+from .decoy_control import token_for
+
 log = logging.getLogger("mirage.controller.evict")
 
 DEFAULT_SSH_CONTROL_URL = os.environ.get("MIRAGE_SSH_CONTROL_URL", "http://10.66.0.21:8022")
@@ -13,7 +15,8 @@ DEFAULT_SSH_CONTROL_URL = os.environ.get("MIRAGE_SSH_CONTROL_URL", "http://10.66
 class SessionEvictor:
     def __init__(self, base_url: str = DEFAULT_SSH_CONTROL_URL, token: Optional[str] = None):
         self.base_url = base_url.rstrip("/")
-        self.token = token or os.environ.get("MIRAGE_INGEST_TOKEN", "")
+        # The SSH decoy only accepts its own token.
+        self.token = token or token_for("ssh")
 
     def terminate_sessions(self, ip: str) -> Dict[str, Any]:
         """Instructs the SSH decoy to notify and immediately kick any active sessions from `ip`."""

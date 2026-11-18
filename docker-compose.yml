@@ -17,12 +17,19 @@ services:
       context: .
       dockerfile: controller/Dockerfile
     environment:
-      MIRAGE_INGEST_TOKEN: ${MIRAGE_INGEST_TOKEN:?set MIRAGE_INGEST_TOKEN in .env}
+      # Each decoy has its own token (run tools/gen_secrets.py). The controller
+      # holds all three so it can check that every event comes from the decoy it
+      # claims to, and push block/tarpit/clear to each decoy with its own token.
+      MIRAGE_TOKEN_ADMIN_PANEL: ${MIRAGE_TOKEN_ADMIN_PANEL:?run tools/gen_secrets.py}
+      MIRAGE_TOKEN_SSH: ${MIRAGE_TOKEN_SSH:?run tools/gen_secrets.py}
+      MIRAGE_TOKEN_S3: ${MIRAGE_TOKEN_S3:?run tools/gen_secrets.py}
+      # Key the dashboard needs for Contain / Release / Reset.
+      MIRAGE_OPERATOR_TOKEN: ${MIRAGE_OPERATOR_TOKEN:?run tools/gen_secrets.py}
       MIRAGE_DB_PATH: /data/mirage.db
       MIRAGE_HONEYTOKENS: /etc/mirage/honeytokens.json
       # Decoy control servers the containment engine pushes block/tarpit/clear to.
       MIRAGE_SSH_CONTROL_URL: http://10.66.0.21:8022
-      MIRAGE_DECOY_CONTROL_URLS: http://10.66.0.20:8020,http://10.66.0.21:8022,http://10.66.0.22:8090
+      MIRAGE_DECOY_CONTROL_URLS: admin-panel=http://10.66.0.20:8020,ssh=http://10.66.0.21:8022,s3=http://10.66.0.22:8090
       # active (default) = respond on risk; observe = watch only (eval observe mode).
       MIRAGE_RESPONSE_MODE: ${MIRAGE_RESPONSE_MODE:-active}
     volumes:
@@ -44,7 +51,8 @@ services:
       dockerfile: decoys/admin-panel/Dockerfile
     environment: &decoy-env
       MIRAGE_CONTROLLER_URL: http://10.66.0.10:8000
-      MIRAGE_INGEST_TOKEN: ${MIRAGE_INGEST_TOKEN:?set MIRAGE_INGEST_TOKEN in .env}
+      # A decoy only ever holds its own token.
+      MIRAGE_INGEST_TOKEN: ${MIRAGE_TOKEN_ADMIN_PANEL:?run tools/gen_secrets.py}
       MIRAGE_HONEYTOKENS: /etc/mirage/honeytokens.json
     volumes:
       - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
@@ -60,6 +68,7 @@ services:
       dockerfile: decoys/ssh/Dockerfile
     environment:
       <<: *decoy-env
+      MIRAGE_INGEST_TOKEN: ${MIRAGE_TOKEN_SSH:?run tools/gen_secrets.py}
       MIRAGE_DATA_DIR: /data
     volumes:
       - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
@@ -76,6 +85,7 @@ services:
       dockerfile: decoys/s3/Dockerfile
     environment:
       <<: *decoy-env
+      MIRAGE_INGEST_TOKEN: ${MIRAGE_TOKEN_S3:?run tools/gen_secrets.py}
     volumes:
       - ./config/honeytokens.local.json:/etc/mirage/honeytokens.json:ro
     networks:

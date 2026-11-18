@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from mirage_common import Event, Registry
 
 from .broadcast import ConnectionManager, Publisher
+from .decoy_control import DECOY_TOKEN_ENV, token_for
 from .engine import Engine
 from .response_engine import ResponseEngine
 from .store import Store
@@ -86,12 +87,30 @@ async def restrict_to_mgmt(request: Request, call_next):
     return await call_next(request)
 
 
-def require_ingest_token(x_mirage_token: str = Header(default="")) -> None:
-    # The attacker shares the lab network with the controller, so only decoys
-    # holding the shared token may submit events.
-    expected = os.environ.get("MIRAGE_INGEST_TOKEN", "")
-    if not expected or not secrets.compare_digest(x_mirage_token, expected):
+# Each decoy has its own token, so a token stolen from one decoy cannot be used
+# to forge events for another. A decoy with no token of its own configured falls
+# back to the shared MIRAGE_INGEST_TOKEN.
+def decoy_tokens() -> dict[str, str]:
+    return {source: token_for(source) for source in DECOY_TOKEN_ENV}
+
+
+def ingest_sources(x_mirage_token: str = Header(default="")) -> set[str]:
+    """The decoys this token belongs to. The attacker shares the lab network with
+    the controller, so an unknown token is refused outright."""
+    matches = {source for source, token in decoy_tokens().items()
+               if token and secrets.compare_digest(x_mirage_token, token)}
+    if not matches:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid ingest token")
+    return matches
+
+
+def require_operator(x_mirage_operator: str = Header(default="")) -> None:
+    """Contain, release and reset need the operator key. The dashboard sends it as a
+    header, which a page on another site cannot do, so this also stops cross-site
+    requests from a browser on the host. No key configured means no control at all."""
+    expected = os.environ.get("MIRAGE_OPERATOR_TOKEN", "")
+    if not expected or not secrets.compare_digest(x_mirage_operator, expected):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "operator key required")
 
 
 @app.get("/health", include_in_schema=False)
@@ -137,8 +156,10 @@ async def dashboard_ws(ws: WebSocket) -> None:
 # --------------------------------------------------------------------- ingest
 
 
-@app.post("/api/events", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_ingest_token)])
-def ingest_event(event: Event, request: Request) -> dict:
+@app.post("/api/events", status_code=status.HTTP_202_ACCEPTED)
+def ingest_event(event: Event, request: Request, sources: set[str] = Depends(ingest_sources)) -> dict:
+    if str(event.source) not in sources:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "token does not belong to this decoy")
     row, alert = request.app.state.engine.process(event)
     log.info("event %s %s from %s asset=%s stage=%s", row["source"], row["event_type"], row["src_ip"],
              row["asset"], row["stage"])
@@ -191,17 +212,17 @@ def get_attacker(ip: str, request: Request) -> dict:
 # ------------------------------------------------------------- manual controls
 
 
-@app.post("/api/contain/{ip}")
+@app.post("/api/contain/{ip}", dependencies=[Depends(require_operator)])
 def manual_contain(ip: str, request: Request) -> dict:
     return request.app.state.response_engine.execute_containment(ip, reason="manual_operator_trigger")
 
 
-@app.post("/api/uncontain/{ip}")
+@app.post("/api/uncontain/{ip}", dependencies=[Depends(require_operator)])
 def manual_uncontain(ip: str, request: Request) -> dict:
     return request.app.state.response_engine.uncontain(ip)
 
 
-@app.post("/api/admin/reset")
+@app.post("/api/admin/reset", dependencies=[Depends(require_operator)])
 def admin_reset(request: Request) -> dict:
     """Wipe all records and clear decoy enforcement. Mgmt-only (the lab guard
     404s this for attacker IPs). Used by the evaluation harness to start each
