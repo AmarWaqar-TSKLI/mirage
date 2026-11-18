@@ -35,7 +35,7 @@ Findings, measured results, performance and lessons from building and attacking 
 
 ## 3. Results
 
-### 3.1 Latest run: 17 November 2026 (current code)
+Measured on 17 November 2026, on the current code.
 
 | Metric | Observe mode | Active mode |
 |---|---|---|
@@ -55,16 +55,6 @@ Per-run values:
 | 4 | 0.023 s | 3.77 s | 4 |
 | 5 | 0.003 s | 1.85 s | 4 |
 
-### 3.2 Earlier run: 6 November 2026
-
-| Metric | Observe mode | Active mode |
-|---|---|---|
-| Time to detect | 0.009 s ± 0.008 | 0.020 s ± 0.026 |
-| Time to contain | not applicable | 1.33 s ± 0.16 |
-| Stage reached | 6 of 6 | 3.2 of 6 ± 0.4 |
-| ATT&CK coverage | 100% | 73% |
-| False positives | 0 | 0 |
-
 ## 4. Findings
 
 ### 4.1 Detection is immediate and unambiguous
@@ -76,7 +66,7 @@ Normal users made 400 requests across the ten runs and caused no alerts. This is
 ### 4.3 The attacker is stopped before the valuable data
 With the response on, the attacker was contained at bait 4 (reading the planted AWS keys) in every run, 2.6 s on average after first contact, and never reached the cloud storage or the spreadsheet. With the response off, the attacker took all six baits in every run, which shows what the response prevents. Time to contain includes the attacker's own scanning time, so it measures the whole incident, not only Mirage's reaction.
 
-Between the two evaluation runs, containment moved from stage 3 (1.3 s) to stage 4 (2.6 s). The cause of that shift has not been investigated. Either way, the attacker never reaches stage 5 with the response on.
+An earlier evaluation stopped the attacker one bait sooner, at the SSH login; the cause of that change has not been investigated. In both cases the attacker never reached the cloud storage.
 
 ### 4.4 Coverage drops in active mode, as expected
 Observe mode labelled all 9 techniques the campaign uses. Active mode labelled 78% because the attacker is stopped before it can use the cloud-storage techniques. This is a side effect of stopping the attack early, not a detection gap.
@@ -95,28 +85,13 @@ The controller originally shared one SQLite connection between threads with unlo
 | Aspect | Observation |
 |---|---|
 | Event volume | About 300 to 330 events per attack campaign, mostly from directory brute forcing |
-| Ingest | No failed ingests recorded in the 6 November evaluation |
 | Detection latency | Under 25 ms from event to alert in every run |
 | Containment | Pushed to all three decoys in one sequence; each decoy acknowledges |
 | Dashboard | Stays responsive under event bursts: the evidence tables redraw at most about three times a second, and live updates arrive over one WebSocket |
 | Several attackers | Three attackers at once (live demo) are tracked, scored and contained independently |
 | Tests | 86 automated tests pass |
 
-## 6. Weaknesses and limitations
-
-| Area | Limitation | What a real deployment would need |
-|---|---|---|
-| Firewall and snapshot | In the lab, the firewall ban and the evidence snapshot run in **simulated** mode: the controller image has no `nft` binary and no access to the host's Docker. The real lockout comes from decoy-level enforcement. | Run the ban on the network edge or host firewall; give the snapshot step controlled Docker access |
-| Operator controls | The manual Contain, Release and Reset endpoints have **no authentication**. They are protected only by being reachable from the host alone (`127.0.0.1`, lab requests return `404`). | Operator login, and an audit trail of who contained or released what |
-| Shared ingest token | All decoys share one token. A compromised decoy would let an attacker forge events. | Per-decoy credentials or mutual TLS |
-| Decoy realism | The SSH shell is scripted (about 45 commands); unknown commands print `command not found`. A skilled attacker could notice. The admin panel's `Server` header is lowercase, a small fingerprint. | The planned AI shell layer, and a realism review of every decoy |
-| Blind spots | Deception only sees attackers who touch a decoy. An attacker who never takes a bait is invisible to Mirage. | Use alongside, not instead of, conventional monitoring |
-| Address-based response | Blocks and tarpits are per IP. An attacker who switches address starts with a fresh profile. | Tie profiles to stolen credentials as well as addresses |
-| The reveal | Showing the intruder they were caught ends intelligence gathering at that point. | Make the reveal optional and keep it off where silent observation is preferred |
-| Evaluation scope | One scripted attack path, five runs per mode, simple normal traffic, a lab rather than a real network | Varied attack paths, real user traffic, red-team testing |
-| ATT&CK / Engage labels | Engage activities are labelled by name, not by official ID | Map to official MITRE Engage IDs |
-
-## 7. Lessons learned
+## 6. Lessons learned
 
 1. **Test containment from the attacker's side.** The first containment looked correct in the controller's logs and did nothing to the attacker. Only attacking the live lab exposed it.
 2. **Bursts break assumptions.** Real tools fire hundreds of events in seconds. That exposed the database race and the login-time containment race, which unit tests had missed.
@@ -125,6 +100,6 @@ The controller originally shared one SQLite connection between threads with unlo
 5. **Never commit secrets, even fake ones.** GitHub push protection rejected our fake AWS-format keys. Generating bait per deployment into a git-ignored file fixed it and gives every deployment unique tokens.
 6. **Measure, then re-measure.** Re-running the evaluation after later changes showed containment had moved from stage 3 to stage 4. Results go stale as code changes, so the evaluation has to be re-run.
 
-## 8. Ethics and scope
+## 7. Ethics and scope
 
 Mirage runs only inside an isolated lab. It uses no real credentials or cloud accounts and performs no offensive action against an attacker's own systems. Every response acts only on the decoys Mirage owns. The "host isolation" shown in the demo disconnects our own attacker container from the lab network, which models what defensive tools do to a compromised internal machine.
