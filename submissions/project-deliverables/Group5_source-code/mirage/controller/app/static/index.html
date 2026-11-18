@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mirage · airspace command</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23d6f24c'/><path d='M16 7 25 16 16 25 7 16z' fill='none' stroke='%23060606' stroke-width='3'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=24" />
+</head>
+<body data-state="idle">
+  <div class="edge" id="edge" aria-hidden="true"></div>
+
+  <!-- ============================== icon rail -->
+  <nav class="rail" aria-label="Sections">
+    <a class="rail-logo" href="#overview" aria-label="Mirage">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 5 27 16 16 27 5 16z" /><path d="M16 11 21 16 16 21 11 16z" /></svg>
+    </a>
+    <div class="rail-nav">
+      <a href="#overview" class="rail-btn on" data-sec="overview" title="Overview"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2" /><rect x="13" y="4" width="7" height="7" rx="2" /><rect x="4" y="13" width="7" height="7" rx="2" /><rect x="13" y="13" width="7" height="7" rx="2" /></svg><span>Overview</span></a>
+      <a href="#airspace" class="rail-btn" data-sec="airspace" title="Airspace"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" /><path d="M12 12 18 6" /></svg><span>Airspace</span></a>
+      <a href="#engagement" class="rail-btn" data-sec="engagement" title="Engagement"><svg viewBox="0 0 24 24"><path d="M3 17h4l3-9 4 12 3-7h4" /></svg><span>Engagement</span></a>
+      <a href="#queue" class="rail-btn" data-sec="queue" title="Alert queue"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg><span>Alerts</span></a>
+    </div>
+    <div class="rail-foot"><i class="link-dot" id="link-dot"></i></div>
+  </nav>
+
+  <div class="app">
+    <!-- ============================== top bar -->
+    <header class="top">
+      <div class="crumb"><b>Mirage</b><span class="sep">/</span><span>Airspace command</span></div>
+      <div class="top-mid">
+        <span class="chip mono" id="net-chip">10.66.0.0/24</span>
+        <span class="chip mono clock"><i></i><span id="clock">--:--:--</span></span>
+        <span class="chip mono" id="mode-chip">Auto-intercept on</span>
+      </div>
+      <div class="top-right">
+        <button type="button" class="chip mono op-chip" id="op-chip">Read-only</button>
+        <span class="link mono" id="link-text">Connecting</span>
+        <button class="icon-btn" id="bell" type="button" aria-label="Open the alert queue"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg><b id="bell-n" hidden>0</b></button>
+        <button class="btn-ghost-sm" id="guide" type="button" aria-pressed="false" title="Explain every panel (G)">Guide</button>
+        <button class="btn-lime" id="check-alerts" type="button">Check alerts</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- ============================== hero -->
+      <section class="hero" id="overview">
+        <div class="hero-text reveal" style="--i:0" data-guide="1 · What is happening right now, in one sentence">
+          <p class="eyebrow mono" id="eyebrow">Deception lab · 3 decoy bases armed</p>
+          <h1 class="headline" id="headline"><span class="w">Airspace</span> <em class="w">clear</em></h1>
+          <p class="subline" id="subline">No contacts. Every decoy is armed and the radar is sweeping the lab.</p>
+        </div>
+        <div class="kpis" data-guide="2 · Live counts. Red while an attacker is active, lime once Mirage has stopped it">
+          <article class="kpi reveal" style="--i:1">
+            <div class="kpi-top"><span class="kpi-ico"><svg viewBox="0 0 24 24"><path d="M12 3 21 12 12 21 3 12z" /></svg></span><span>Hostile tracks</span></div>
+            <div class="kpi-val"><b id="k-tracks">0</b><span class="kpi-tag" id="k-tracks-tag">clear</span></div>
+          </article>
+          <article class="kpi reveal" style="--i:2">
+            <div class="kpi-top"><span class="kpi-ico"><svg viewBox="0 0 24 24"><path d="M12 4 22 20H2z" /><path d="M12 10v4M12 17v.5" /></svg></span><span>Alerts raised</span></div>
+            <div class="kpi-val"><b id="k-alerts">0</b><span class="kpi-tag" id="k-alerts-tag">0 critical</span></div>
+          </article>
+          <article class="kpi reveal" style="--i:3">
+            <div class="kpi-top"><span class="kpi-ico"><svg viewBox="0 0 24 24"><path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9" /></svg></span><span>Time to intercept</span></div>
+            <div class="kpi-val"><b id="k-ttc">—</b><span class="kpi-tag" id="k-ttc-tag">no intercept</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="chain reveal" style="--i:4" id="chain" aria-label="Attack chain" data-guide="3 · The six baits an attacker has to take, in order. Red = taken, crossed out = never reached"></section>
+
+      <!-- ============================== airspace -->
+      <section class="main" id="airspace">
+        <article class="card map-card reveal" style="--i:4" data-guide="4 · The live map. Each decoy is a base; the red diamond is the attacker moving between them">
+          <header class="card-head">
+            <div>
+              <h2>Airspace</h2>
+              <p class="card-sub" id="map-sub">Every decoy is a base. Intruders are tracked as they fly between them.</p>
+            </div>
+            <div class="map-tools">
+              <div class="seg" role="group" aria-label="Map layers">
+                <button type="button" class="seg-b on" data-layer="route" aria-pressed="true">Route</button>
+                <button type="button" class="seg-b on" data-layer="history" aria-pressed="true">History</button>
+                <button type="button" class="seg-b on" data-layer="sweep" aria-pressed="true">Sweep</button>
+              </div>
+              <button type="button" class="tool" id="follow" aria-pressed="false" title="Keep the locked track centred (F)">Follow</button>
+              <button type="button" class="tool sq" id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+              <button type="button" class="tool sq" id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+              <button type="button" class="tool sq" id="recenter" title="Reset the view (0)" aria-label="Reset the view"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4" /></svg></button>
+            </div>
+          </header>
+          <div class="map-wrap" id="map-wrap">
+            <canvas id="map" aria-label="Tactical map of the lab with intruder tracks"></canvas>
+            <div class="hovercard" id="hovercard" hidden></div>
+            <div class="banner" id="banner" hidden><span class="banner-k" id="banner-k"></span><b id="banner-t"></b><span id="banner-s"></span></div>
+            <div class="map-empty" id="map-empty"><b>Airspace clear</b><span>Waiting for the first contact on any decoy</span></div>
+            <ul class="legend mono" aria-label="Map key">
+              <li><i class="lg-hostile"></i>Hostile track</li>
+              <li><i class="lg-base"></i>Decoy base</li>
+              <li><i class="lg-friend"></i>Friendly</li>
+              <li><i class="lg-station"></i>Mirage radar</li>
+              <li><i class="lg-jewel"></i>Crown jewel</li>
+            </ul>
+            <div class="zoom-hint" id="zoom-hint" hidden><span>Hold <kbd>Ctrl</kbd> and scroll to zoom the map</span></div>
+            <div class="map-foot mono"><span id="grid-ref">GRID —</span><span class="hint">Drag to pan · Ctrl + scroll to zoom · click a track to lock it</span></div>
+          </div>
+        </article>
+
+        <aside class="side">
+          <article class="card lock-card reveal" style="--i:5" id="lock-card" data-guide="5 · The attacker Mirage is watching: how dangerous it is (0–100) and buttons to block or release it">
+            <header class="card-head">
+              <div><h2>Target lock</h2><p class="card-sub" id="lock-sub">No track locked</p></div>
+              <span class="badge" id="lock-badge">Standby</span>
+            </header>
+            <div class="lock-body">
+              <div class="dial" id="dial">
+                <svg viewBox="0 0 200 200" id="dial-svg" aria-hidden="true"></svg>
+                <div class="dial-mid"><b id="dial-n">0</b><span>threat score</span></div>
+              </div>
+              <dl class="lock-facts">
+                <div><dt>Track</dt><dd id="lf-id">—</dd></div>
+                <div><dt>Address</dt><dd class="mono" id="lf-ip">—</dd></div>
+                <div><dt>Now at</dt><dd id="lf-pos">—</dd></div>
+                <div><dt>Next bait</dt><dd id="lf-head">—</dd></div>
+                <div><dt>Time on track</dt><dd class="mono" id="lf-time">—</dd></div>
+                <div><dt>Baits taken</dt><dd id="lf-bait">—</dd></div>
+              </dl>
+            </div>
+            <div class="lock-actions">
+              <button class="btn-red" id="btn-contain" type="button" disabled>Intercept now</button>
+              <button class="btn-ghost" id="btn-release" type="button" disabled>Release</button>
+            </div>
+          </article>
+
+          <article class="card tracks-card reveal" style="--i:6" data-guide="6 · Every attacker seen. Click one to follow it">
+            <header class="card-head"><div><h2>Track table</h2><p class="card-sub" id="tracks-sub">0 tracks</p></div></header>
+            <div class="tracks" id="tracks" role="list"></div>
+            <p class="empty" id="tracks-empty">No tracks. Contacts appear here the moment they touch a decoy.</p>
+          </article>
+        </aside>
+      </section>
+
+      <!-- ============================== engagement -->
+      <section class="card engage reveal" style="--i:7" id="engagement" data-guide="7 · How fast Mirage reacted, from first contact to blocking the attacker">
+        <header class="card-head"><div><h2>Engagement</h2><p class="card-sub" id="engage-sub">From first contact to intercept</p></div><span class="badge" id="engage-badge">No engagement</span></header>
+        <ol class="phases" id="phases"></ol>
+      </section>
+
+      <section class="charts" data-guide="8 · How busy the attacker was, how deep it got, and which decoy took the most hits">
+        <article class="card chart-card reveal" style="--i:8">
+          <header class="card-head"><div><h2>Contact volume</h2><p class="card-sub"><b id="vol-total">0</b> events from the locked track</p></div></header>
+          <div class="chart" id="vol"></div>
+        </article>
+        <article class="card chart-card reveal" style="--i:9">
+          <header class="card-head"><div><h2>Threat corridor</h2><p class="card-sub">How deep they got, and when Mirage reacted</p></div></header>
+          <div class="chart" id="corridor"></div>
+        </article>
+        <article class="card chart-card reveal" style="--i:10">
+          <header class="card-head"><div><h2>Bases under fire</h2><p class="card-sub">Share of hostile events per decoy</p></div></header>
+          <div class="gauge" id="gauge"></div>
+        </article>
+      </section>
+
+      <!-- ============================== queue -->
+      <section class="card queue reveal" style="--i:11" id="queue" data-guide="9 · The evidence: every alert, request and command, and what was stolen">
+        <header class="card-head">
+          <div><h2>Alert queue</h2><p class="card-sub" id="queue-sub">Everything Mirage saw, newest first</p></div>
+          <div class="tabs" role="tablist" aria-label="Queue views" id="tabs">
+            <span class="tab-ink" id="tab-ink"></span>
+            <button role="tab" type="button" id="tab-alerts" aria-controls="pane-alerts" aria-selected="true">Alerts <b id="n-alerts">0</b></button>
+            <button role="tab" type="button" id="tab-feed" aria-controls="pane-feed" aria-selected="false">Live feed <b id="n-feed">0</b></button>
+            <button role="tab" type="button" id="tab-loot" aria-controls="pane-loot" aria-selected="false">Stolen <b id="n-loot">0/6</b></button>
+            <button role="tab" type="button" id="tab-attack" aria-controls="pane-attack" aria-selected="false">ATT&amp;CK <b id="n-attack">0</b></button>
+            <button role="tab" type="button" id="tab-resp" aria-controls="pane-resp" aria-selected="false">Responses <b id="n-resp">0</b></button>
+          </div>
+        </header>
+        <div class="pane" role="tabpanel" id="pane-alerts" aria-labelledby="tab-alerts">
+          <div class="thead mono"><span>Time</span><span>Alert</span><span>Track</span><span>Severity</span><span>Status</span><span></span></div>
+          <div class="tbody" id="alerts"></div><p class="empty" id="alerts-empty">No alerts yet.</p>
+        </div>
+        <div class="pane" role="tabpanel" id="pane-feed" aria-labelledby="tab-feed" hidden><div class="tbody" id="feed"></div><p class="empty" id="feed-empty">Waiting for the first event.</p></div>
+        <div class="pane" role="tabpanel" id="pane-loot" aria-labelledby="tab-loot" hidden><div class="loot" id="loot"></div></div>
+        <div class="pane" role="tabpanel" id="pane-attack" aria-labelledby="tab-attack" hidden><div class="matrix" id="matrix"></div><div class="techs" id="techs"></div></div>
+        <div class="pane" role="tabpanel" id="pane-resp" aria-labelledby="tab-resp" hidden><div class="tbody" id="resp"></div><p class="empty" id="resp-empty">Mirage has not responded to anything yet.</p></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="takeover" id="takeover" hidden role="status" aria-live="assertive">
+    <div class="to-ring"></div><div class="to-ring r2"></div>
+    <div class="to-card">
+      <span class="to-k mono">Mirage · auto-intercept</span>
+      <h2>Threat neutralized</h2>
+      <p id="to-line"></p>
+      <div class="to-facts" id="to-facts"></div>
+      <span class="to-hint mono">click anywhere to close</span>
+    </div>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="tip" id="tip" hidden></div>
+
+  <script src="/static/app.js?v=24"></script>
+</body>
+</html>

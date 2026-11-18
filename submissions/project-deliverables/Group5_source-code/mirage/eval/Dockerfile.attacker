@@ -1,0 +1,31 @@
+# Attacker/benign toolbox for the Mirage lab.
+#
+# The lab network is internal (no internet) at runtime, so every tool the
+# campaign needs is baked in at build time. Build happens on the host, which
+# has internet; only the running containers are offline.
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nmap \
+        gobuster \
+        hydra \
+        curl \
+        ca-certificates \
+        sshpass \
+        openssh-client \
+        awscli \
+        jq \
+        dirb \
+    && rm -rf /var/lib/apt/lists/*
+
+# dirb ships the common.txt wordlist gobuster uses, at /usr/share/dirb/wordlists/.
+
+COPY eval/campaign.sh /opt/campaign.sh
+COPY eval/benign.sh /opt/benign.sh
+# op: the narrated attack console for live demos (`docker compose exec attacker op`)
+COPY eval/op.sh /usr/local/bin/op
+RUN chmod +x /opt/campaign.sh /opt/benign.sh /usr/local/bin/op
+
+# Stay alive so the harness can `docker compose exec` the scripts on demand.
+CMD ["sleep", "infinity"]

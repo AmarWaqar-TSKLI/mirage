@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+data/
+config/honeytokens.local.json
+*.docx
+*.dotx

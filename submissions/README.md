@@ -19,4 +19,4 @@ Each group member submits the same files from this folder.
 |---|---|
 | `Group5_presentation.pptx` | The presentation slides |
 
-The source zip is the repository at the commit that produced these files, without this `submissions/` folder and without anything git ignores (no `.env`, no generated secrets or fake keys). The editable sources of the documents are in `docs/submission/`. The full repository is at https://github.com/AmarWaqar-TSKLI/mirage.
+The source zip holds only what is needed to build, run and test Mirage: the controller, the three decoys, the shared library, the config, the tools, the attack and evaluation machines, `docker-compose.yml`, `.env.example`, the `demo` runner and the README. It has no `.env`, generated secrets or fake keys. The editable sources of the documents are in `docs/submission/`. The full repository is at https://github.com/AmarWaqar-TSKLI/mirage.
