@@ -18,6 +18,5 @@ Each group member submits the same files from this folder.
 | File | What it is |
 |---|---|
 | `Group5_presentation.pptx` | The presentation slides |
-| `Group5_demo-playbook.pdf` | The live demo script: commands, timings and what to say |
 
 The source zip is the repository at the commit that produced these files, without this `submissions/` folder and without anything git ignores (no `.env`, no generated secrets or fake keys). The editable sources of the documents are in `docs/submission/`. The full repository is at https://github.com/AmarWaqar-TSKLI/mirage.
