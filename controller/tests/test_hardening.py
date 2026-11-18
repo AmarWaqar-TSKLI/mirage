@@ -89,6 +89,14 @@ def test_the_thief_using_its_own_credential_is_not_a_link(observe_client):
     assert observe_client.get(f"/api/attackers/{THIEF}").json()["linked_to"] is None
 
 
+def test_two_intruders_who_each_found_the_password_are_not_linked(observe_client):
+    send = lambda body: observe_client.post("/api/events", json=body, headers={TOKEN_HEADER: TOKEN})
+    for ip in (THIEF, REUSER):   # both download the backup .env themselves
+        send(_event("admin-panel", ip, asset="/backup/.env.bak", honeytoken_id="ht-env-backup-file"))
+    send(_event("ssh", REUSER, event_type="login_attempt", honeytoken_id="ht-ssh-password"))
+    assert observe_client.get(f"/api/attackers/{REUSER}").json()["linked_to"] is None
+
+
 def test_containing_an_intruder_also_contains_its_other_addresses():
     store = Store(":memory:")
     store.upsert_attacker(_attacker(THIEF))

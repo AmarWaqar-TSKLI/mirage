@@ -72,7 +72,10 @@ class Engine:
             # other than the one that stole it. The new address inherits the whole
             # intrusion, so switching IPs does not reset the attacker.
             origin = None
-            if new_token and token.id in self.leaked_by:
+            # Only when this address never took that bait itself: two intruders who
+            # each found the password on their own are two intruders, not one.
+            if (new_token and token.id in self.leaked_by
+                    and self.leaked_by[token.id] not in attacker["tokens"]):
                 thief = self.store.first_holder(self.leaked_by[token.id])
                 if thief and thief != ip and self.store.add_link(ip, thief, token.id, ts):
                     origin = self.store.get_attacker(thief)
