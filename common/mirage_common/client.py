@@ -31,9 +31,16 @@ class EventClient:
             return False
 
     def submit(self, event: Event) -> None:
-        """Send an event in the background so the attacker never waits on it."""
-        _pool.submit(self.send, event)
+        """Send an event in the background so the attacker never waits on it.
+
+        Honeytoken events take their own lane. A directory brute force can queue
+        hundreds of ordinary events, and a bait event stuck behind them would
+        reach the controller seconds late, after events from other decoys that
+        happened later (which, for one, breaks linking an intruder's addresses).
+        """
+        (_bait_pool if event.honeytoken_id else _pool).submit(self.send, event)
 
 
 # Shared by every client in the process; a few workers are plenty for a decoy.
 _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mirage-events")
+_bait_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mirage-bait-events")
