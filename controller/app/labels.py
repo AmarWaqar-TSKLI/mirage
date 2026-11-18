@@ -20,13 +20,18 @@ EVENT_TECHNIQUES = {
     EventType.COMMAND: ["T1059.004"],             # Command and Scripting Interpreter: Unix Shell
 }
 
-# Engage activities: how Mirage is engaging the adversary when this event fires.
+# Engage activities: how Mirage is engaging the adversary when this event fires,
+# with their official MITRE Engage activity IDs.
+NETWORK_MONITORING = "EAC0002 Network Monitoring"
+SYSTEM_ACTIVITY_MONITORING = "EAC0003 System Activity Monitoring"
+LURES = "EAC0005 Lures"
+
 SOURCE_ENGAGE = {
-    Source.ADMIN_PANEL: ["Network Monitoring"],
-    Source.S3: ["Network Monitoring"],
-    Source.SSH: ["System Activity Monitoring"],
+    Source.ADMIN_PANEL: [NETWORK_MONITORING],
+    Source.S3: [NETWORK_MONITORING],
+    Source.SSH: [SYSTEM_ACTIVITY_MONITORING],
 }
-TOKEN_ENGAGE = ["Lures"]
+TOKEN_ENGAGE = [LURES]
 
 
 def label(event: Event, token: Honeytoken | None) -> tuple[list[str], list[str]]:

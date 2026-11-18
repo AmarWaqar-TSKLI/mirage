@@ -48,12 +48,12 @@ def test_labels(client, send):
     send(src_ip=IP, source="ssh", event_type="command", details={"command": "id"}, attack_techniques=["T1033"])
     event = client.get("/api/events").json()[0]
     assert event["techniques"] == ["T1033", "T1059.004"]
-    assert event["engage"] == ["System Activity Monitoring"]
+    assert event["engage"] == ["EAC0003 System Activity Monitoring"]
 
     send(src_ip=IP, **TRAIL[1])
     event = client.get("/api/events", params={"limit": 1}).json()[0]
     assert event["techniques"] == ["T1552.001"]
-    assert event["engage"] == ["Network Monitoring", "Lures"]
+    assert event["engage"] == ["EAC0002 Network Monitoring", "EAC0005 Lures"]
 
 
 def test_unknown_honeytoken_is_stored_without_stage(client, send):

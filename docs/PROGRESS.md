@@ -155,7 +155,7 @@ Plan and requirements: [plan.md](plan.md), [requirements.md](requirements.md).
 ## Known issues and notes
 - Decoys send events from a background thread pool, so events from one burst can reach the controller slightly out of order. Stage tracking and alerts are unaffected because `max_stage` only increases, but the dashboard should sort by event `timestamp`.
 - The admin panel's `Server` header is sent in lowercase (`server:`), a tiny fingerprinting tell. It is valid HTTP.
-- MITRE Engage activities are labelled by name ("Lures", "Network Monitoring", "System Activity Monitoring"). Check the names and add the official IDs from engage.mitre.org before the final report.
+- MITRE Engage activities carry their official IDs: EAC0002 Network Monitoring, EAC0003 System Activity Monitoring, EAC0005 Lures.
 - Fake secrets are never committed. GitHub push protection rejects AWS-format keys even when they are fake, so the values are generated locally into the git-ignored `config/honeytokens.local.json`. Never move them into a tracked file.
 
 ---
