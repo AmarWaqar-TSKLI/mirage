@@ -18,11 +18,25 @@ STAGE_SEVERITY = {
 }
 
 
+def leaked_by(registry: Registry) -> dict[str, str]:
+    """Credential token -> the bait that leaks it.
+
+    A credential is planted inside an earlier bait: the SSH password inside the
+    backup .env, the AWS key inside ~/.aws/credentials. In the registry they share
+    a `planted_at`, and the bait has the lower stage. Whoever touched that bait
+    first is the one who stole the credential.
+    """
+    tokens = list(registry)
+    return {t.id: b.id for t in tokens for b in tokens
+            if b.id != t.id and b.planted_at == t.planted_at and b.stage < t.stage}
+
+
 class Engine:
     def __init__(self, store: Store, registry: Registry, response_engine: Optional[ResponseEngine] = None):
         self.store = store
         self.registry = registry
         self.response_engine = response_engine
+        self.leaked_by = leaked_by(registry)
 
     def process(self, event: Event) -> tuple[dict, dict | None]:
         """Store the event, update the attacker, trigger responses, and return (event, alert or None)."""
@@ -54,13 +68,29 @@ class Engine:
             }
             new_token = token is not None and token.id not in attacker["tokens"]
 
+            # Same intruder, new address: a stolen credential used from an address
+            # other than the one that stole it. The new address inherits the whole
+            # intrusion, so switching IPs does not reset the attacker.
+            origin = None
+            if new_token and token.id in self.leaked_by:
+                thief = self.store.first_holder(self.leaked_by[token.id])
+                if thief and thief != ip and self.store.add_link(ip, thief, token.id, ts):
+                    origin = self.store.get_attacker(thief)
+            if origin:
+                attacker["max_stage"] = max(attacker["max_stage"], origin["max_stage"])
+                attacker["techniques"] = list(dict.fromkeys(attacker["techniques"] + origin["techniques"]))
+                attacker["tokens"] = list(dict.fromkeys(attacker["tokens"] + origin["tokens"]))
+
             new_event_count = attacker["event_count"] + 1
             new_max_stage = max(attacker["max_stage"], int(stage))
             new_techniques = list(dict.fromkeys(attacker["techniques"] + techniques))
-            new_tokens = attacker["tokens"] + [token.id] if new_token else attacker["tokens"]
+            new_tokens = list(dict.fromkeys(attacker["tokens"] + [token.id])) if new_token else attacker["tokens"]
 
             # Dynamic risk score calculation and active response playbook selection
             risk_score = calculate_risk_score(new_max_stage, new_techniques, new_tokens, new_event_count)
+            if origin and origin.get("contained_at"):
+                # Reusing a contained intruder's stolen credential is the strongest signal there is.
+                risk_score = 100
             playbook = evaluate_playbook(risk_score, attacker.get("contained_at") is not None)
 
             attacker.update(
@@ -74,7 +104,11 @@ class Engine:
             )
 
             alert = None
-            if new_token:
+            if origin:
+                alert = {"severity": "critical",
+                         "title": f"Stolen credential reused from a new address: {token.description or token.id}"
+                                  f" was taken by {origin['ip']}"}
+            elif new_token:
                 alert = {"severity": STAGE_SEVERITY.get(stage, "medium"),
                          "title": f"Honeytoken touched: {token.description or token.id} (stage {int(stage)})"}
             elif first_contact:

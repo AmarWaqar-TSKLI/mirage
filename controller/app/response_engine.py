@@ -136,6 +136,13 @@ class ResponseEngine:
         if attacker:
             self._publish({"type": "attacker", "data": attacker})
         log.warning("containment sequence completed for %s", ip)
+
+        # The same intruder on other addresses (linked by a reused stolen credential)
+        # goes down with it. Each is contained once; the check stops any cycle.
+        for other in self.store.linked_from(ip):
+            linked = self.store.get_attacker(other)
+            if linked and linked.get("contained_at") is None and not self.allowlist.is_allowed(other):
+                self.execute_containment(other, reason=f"same intruder as contained {ip}")
         return saved
 
     def execute_tarpit(self, ip: str, delay: float = 3.0) -> Dict[str, Any]:

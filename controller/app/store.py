@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS responses (
     details       TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS responses_ip ON responses (src_ip, ts);
+
+-- One row per address that reused a credential stolen by another address:
+-- both are the same intruder, so the newer address is linked to the origin.
+CREATE TABLE IF NOT EXISTS links (
+    ip            TEXT PRIMARY KEY,
+    origin        TEXT NOT NULL,
+    token         TEXT NOT NULL,
+    ts            TEXT NOT NULL
+);
 """
 
 JSON_COLUMNS = {"techniques", "engage", "details", "tokens"}
@@ -116,10 +125,30 @@ class Store:
             )
             return {**r, "id": cur.lastrowid}
 
+    # Attacker rows carry `linked_to` (the origin address, or None), read from links.
+    _ATTACKER_SELECT = "SELECT a.*, l.origin AS linked_to FROM attackers a LEFT JOIN links l ON l.ip = a.ip"
+
     def get_attacker(self, ip: str) -> dict | None:
         with self.lock:
-            row = self.db.execute("SELECT * FROM attackers WHERE ip = ?", (ip,)).fetchone()
+            row = self.db.execute(f"{self._ATTACKER_SELECT} WHERE a.ip = ?", (ip,)).fetchone()
             return _row(row) if row else None
+
+    def first_holder(self, token_id: str) -> str | None:
+        """The address that first touched a honeytoken, i.e. who stole it."""
+        with self.lock:
+            row = self.db.execute("SELECT src_ip FROM events WHERE honeytoken_id = ? ORDER BY ts LIMIT 1",
+                                  (token_id,)).fetchone()
+            return row["src_ip"] if row else None
+
+    def add_link(self, ip: str, origin: str, token_id: str, ts: str) -> bool:
+        """Record that `ip` is the same intruder as `origin`. Returns False if already linked."""
+        with self.lock:
+            cur = self.db.execute("INSERT OR IGNORE INTO links VALUES (?, ?, ?, ?)", (ip, origin, token_id, ts))
+            return cur.rowcount == 1
+
+    def linked_from(self, origin: str) -> list[str]:
+        with self.lock:
+            return [r["ip"] for r in self.db.execute("SELECT ip FROM links WHERE origin = ?", (origin,)).fetchall()]
 
     def upsert_attacker(self, a: dict) -> None:
         with self.lock:
@@ -141,7 +170,8 @@ class Store:
     def reset(self) -> None:
         """Wipe all records. Used by the evaluation harness between runs."""
         with self.lock:
-            self.db.executescript("DELETE FROM events; DELETE FROM alerts; DELETE FROM responses; DELETE FROM attackers;")
+            self.db.executescript("DELETE FROM events; DELETE FROM alerts; DELETE FROM responses;"
+                                  " DELETE FROM attackers; DELETE FROM links;")
             self.db.commit()
 
     def clear_containment(self, ip: str) -> None:
@@ -163,5 +193,5 @@ class Store:
 
     def attackers(self) -> list[dict]:
         with self.lock:
-            rows = self.db.execute("SELECT * FROM attackers ORDER BY last_seen DESC").fetchall()
+            rows = self.db.execute(f"{self._ATTACKER_SELECT} ORDER BY a.last_seen DESC").fetchall()
         return [_row(r) for r in rows]
