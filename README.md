@@ -6,7 +6,9 @@ Mirage is an Information Security project that turns a network into a trap. Inst
 
 The project is based on the [MITRE Engage](https://engage.mitre.org) framework for adversary engagement, and every observed action is mapped to [MITRE ATT&CK](https://attack.mitre.org) techniques.
 
-> **Status:** All 8 steps built and run end to end in the lab. Controller, decoys (admin panel, SSH server, S3 endpoint), dynamic risk scoring, response playbooks, active containment, the live dashboard and the evaluation harness are all in place, with 85 automated tests passing. Measured in the Docker lab: detection under 50 ms, containment ~1.3 s, 100% ATT&CK coverage, 0 false positives. See [docs/eval-results.md](docs/eval-results.md) for the full numbers, [docs/PROGRESS.md](docs/PROGRESS.md) for detail, and [docs/plan.md](docs/plan.md) for the steps 7–8 design.
+> **Status:** Complete. Three decoys, the breadcrumb trail, detection with ATT&CK labelling, risk scoring, automatic response, the live dashboard and the evaluation harness all run end to end in the Docker lab, with 86 automated tests passing. Latest evaluation (17 Nov 2026): first alert within 25 ms, attacker contained in 2.6 s on average at bait 4 of 6, 0 false alarms from 400 normal-user requests.
+>
+> **Submission:** the graded deliverables (how to run, architecture, security analysis, source zip and slides) are in [`submissions/`](submissions/).
 
 ---
 
@@ -33,14 +35,12 @@ Each step is a decoy or a uniquely traceable honeytoken. Mirage knows exactly wh
 Docker containers hosting intentionally exposed, realistic-looking decoy services:
 - **Fake admin panel**: an internal login page whose `robots.txt` points to an exposed backup `.env`. Records login attempts and directory enumeration.
 - **Fake internal SSH server**: an interactive server with a believable filesystem holding planted secrets. Full sessions are recorded as evidence.
-- **Fake AWS S3 endpoint**: an S3-compatible service (MinIO) that accepts the planted fake AWS keys, so stolen cloud credentials can be traced end to end.
+- **Fake AWS S3 endpoint**: our own S3-compatible service with AWS Signature V4 checking, so the real AWS CLI works against it. It accepts only the planted fake AWS keys, so stolen cloud credentials can be traced end to end.
 
-### 2. AI-Driven Interactive Shell
-Traditional honeypots only emulate a fixed set of commands, so attackers quickly spot them. Mirage's SSH decoy uses a hybrid design:
-- **Deterministic layer:** common commands and all planted bait come from a fixed virtual filesystem.
-- **LLM layer:** every other command is answered by a large language model acting as the shell of one consistent fake server.
-- **Session state:** files and directories the attacker creates persist for the whole session.
-- **Command intelligence:** each command is classified to an ATT&CK technique and streamed live to the dashboard.
+### 2. Interactive Shell
+The SSH decoy runs a scripted shell of about 45 commands (pipes, redirects, variables) over a believable virtual filesystem. Files the attacker creates persist for the session, and every command is classified to an ATT&CK technique and streamed live to the dashboard.
+
+The AI layer from the proposal, where a language model answers commands the scripted shell does not know, is **designed but not built**: the shell has a fallback hook ready for it.
 
 ### 3. Honeytokens
 Uniquely tagged fake secrets, each recorded where it was planted:
@@ -64,8 +64,8 @@ Uniquely tagged fake secrets, each recorded where it was planted:
 When an attacker's risk score crosses the containment threshold, Mirage runs a disruption sequence. Every action targets only the attacker's own session and the decoy containers that Mirage controls, so the whole response stays inside the isolated lab.
 
 - **Session freeze:** the active connection is throttled to a standstill, so the attacker's tools stall, hang and time out.
-- **Lockout and notice:** the session is terminated, a visible notice tells the intruder they have been detected and contained, and the source address is banned at the host firewall (nftables) with an expiry timer.
-- **Forensic capture:** before the decoy resets, Mirage saves the full session recording and a snapshot of the container.
+- **Lockout and notice:** the session is terminated, every decoy blocks the address (web and S3 return 403, SSH refuses even the right password) and shows the intruder that the system was a trap. A host firewall ban (nftables/iptables) is attempted too; in the lab it runs in simulated mode.
+- **Forensic capture:** the full SSH session recording is saved, and a container snapshot is attempted (simulated in the lab).
 
 ### 6. Command & Telemetry Dashboard
 A single real-time web page showing:
@@ -77,20 +77,38 @@ A single real-time web page showing:
 
 ## Evaluation
 
-Mirage will be tested in an isolated lab against a scripted attack campaign (nmap, gobuster, hydra, AWS CLI) while a benign traffic generator simulates normal users. We will measure:
-- Mean **time-to-detect** and **time-to-contain**
-- **False-positive rate** under benign traffic
-- **ATT&CK technique coverage**
+Tested in the lab with a scripted attack using real tools (nmap, gobuster, hydra, SSH, AWS CLI) while a generator plays normal users against a real staff website. Five measured runs per mode, 17 November 2026:
 
-## Planned Tech Stack
+| Metric | Response off (observe) | Response on (active) |
+|---|---|---|
+| Time to detect | 7 ms mean, 23 ms worst | under 1 ms |
+| Time to contain | n/a | 2.63 s ± 0.69 |
+| Furthest bait reached | 6 of 6 | 4 of 6 |
+| ATT&CK coverage | 100% | 78% (attack stopped early) |
+| False positives | 0 | 0 |
+
+Full results: [docs/eval-results.md](docs/eval-results.md). Discussion: [the security analysis](submissions/project-deliverables/04-security-analysis.md).
+
+## Quick start
+
+```bash
+cp .env.example .env    # then set MIRAGE_INGEST_TOKEN to a random value
+python3 -m venv .venv && .venv/bin/pip install ./common && .venv/bin/python tools/gen_honeytokens.py
+./demo up               # dashboard at http://127.0.0.1:8000/
+./demo attack           # run the narrated attack
+```
+
+Full instructions: [How to run](submissions/project-deliverables/02-how-to-run.md).
+
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
 | Lab environment | Docker, Docker Compose |
 | Controller / API | Python, FastAPI, SQLite |
-| SSH decoy | Paramiko + LLM-backed shell |
-| Fake S3 | MinIO |
-| Containment | nftables |
+| SSH decoy | Paramiko, scripted shell (LLM fallback planned) |
+| Fake S3 | FastAPI, AWS Signature V4 |
+| Containment | Decoy-level enforcement, nftables/iptables where available |
 | Dashboard | Single web page, WebSockets |
 
 ## Scope & Ethics
