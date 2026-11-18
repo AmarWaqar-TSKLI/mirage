@@ -1,6 +1,18 @@
 # Evaluation results
 
-## Latest run: 17 November 2026 (current code)
+## Latest run: 19 November 2026 (final code)
+
+Same method, after adding per-decoy tokens, the operator key, intruder linking and the bait fast lane.
+
+| Metric | Observe mode | Active mode |
+|---|---|---|
+| Time to detect | 0.003 s ± 0.003 (worst 0.007) | 0.004 s ± 0.006 (worst 0.016) |
+| Time to contain | n/a | 2.38 s ± 0.30 |
+| Trail stage reached | 6 / 6 in every run | 4 / 6 in every run |
+| ATT&CK coverage | 1.00 | 0.78 |
+| False-positive alerts | 0 | 0 |
+
+## Run: 17 November 2026
 
 Run with `eval/run.sh 5 <mode>` in the Docker lab: 5 measured campaigns per mode
 after one discarded warmup, 40 benign requests per run (400 across both modes).

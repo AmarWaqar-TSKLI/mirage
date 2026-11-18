@@ -57,11 +57,11 @@ Installed into every service, so all parts speak the same language.
 | Module | Role |
 |---|---|
 | `events.py` | The single `Event` model every decoy sends: source, type, source IP, asset, honeytoken ID, suggested ATT&CK techniques, details |
-| `client.py` | `EventClient`: sends events in a background thread pool and never raises, so a decoy keeps working if the controller is down |
+| `client.py` | `EventClient`: sends events in the background and never raises, so a decoy keeps working if the controller is down. Honeytoken events have their own fast lane, so a bait is reported within milliseconds even while a scan floods the normal queue |
 | `trail.py` | The six breadcrumb trail stages, in order |
 | `honeytokens.py` | The registry of planted items: ID, stage, where it was planted, and its generated value |
 | `enforce.py` | Per-decoy containment state: which IPs are blocked or tarpitted, with expiry |
-| `control.py` | A small token-protected control server each decoy runs, so the controller can push block / tarpit / clear |
+| `control.py` | A small control server each decoy runs, protected by that decoy's own token, so the controller can push block / tarpit / clear |
 | `reveal.py` | The screen a contained intruder is shown |
 
 ### 3.2 Decoys: `decoys/`
@@ -76,13 +76,13 @@ Installed into every service, so all parts speak the same language.
 
 | Module | Role |
 |---|---|
-| `main.py` | FastAPI app: event ingestion, REST reads, manual controls, the WebSocket, the lab lockdown middleware |
-| `store.py` | SQLite storage for events, alerts, attackers and responses; every access is locked |
-| `engine.py` | Processes each event: trail stage, labels, alerts, attacker profile, risk score, playbook |
-| `labels.py` | Maps honeytoken kinds and event types to ATT&CK techniques and MITRE Engage activities |
+| `main.py` | FastAPI app: event ingestion (per-decoy tokens), REST reads, operator-key controls, the WebSocket, the lab lockdown middleware |
+| `store.py` | SQLite storage for events, alerts, attackers, responses and links between an intruder's addresses; every access is locked |
+| `engine.py` | Processes each event: trail stage, labels, alerts, attacker profile, linking a reused stolen credential to the address that stole it, risk score, playbook |
+| `labels.py` | Maps honeytoken kinds and event types to ATT&CK techniques and to MITRE Engage activities with their official IDs (EAC0002 Network Monitoring, EAC0003 System Activity Monitoring, EAC0005 Lures) |
 | `risk.py` | The threat score and the playbook it selects |
 | `response_engine.py` | Runs the tarpit and the containment sequence |
-| `decoy_control.py` | Pushes block / tarpit / clear to every decoy's control server |
+| `decoy_control.py` | Pushes block / tarpit / clear to every decoy's control server, each with that decoy's own token |
 | `evict.py` | Asks the SSH decoy to end an attacker's live sessions |
 | `firewall.py` | Host firewall ban through nftables or iptables, with a simulated fallback |
 | `forensics.py` | Container snapshot as evidence through `docker commit`, with a simulated fallback |
@@ -104,15 +104,16 @@ Installed into every service, so all parts speak the same language.
 
 ## 4. How an attack flows through the system
 
-**Step 1: a decoy reports.** Any request, login, command or file read becomes an `Event` posted to `POST /api/events` with the shared `X-Mirage-Token` header. Decoys report *what happened*; they make no decisions.
+**Step 1: a decoy reports.** Any request, login, command or file read becomes an `Event` posted to `POST /api/events` with that decoy's own token in the `X-Mirage-Token` header. The controller rejects a token that belongs to a different decoy than the event claims to come from. Decoys report *what happened*; they make no decisions.
 
 **Step 2: the controller understands it.** For each event the engine:
 1. stores it;
 2. looks up its honeytoken, if any, and the trail stage that token belongs to;
 3. labels it with ATT&CK techniques and Engage activities;
 4. updates the attacker's profile: furthest stage reached (it only ever rises), techniques, honeytokens taken, event count;
-5. raises an alert on first contact from an address and the first time that address touches each honeytoken (repeats are stored but not re-alerted, so a scanner cannot flood the screen);
-6. recomputes the threat score and selects the playbook.
+5. checks for **the same intruder on a new address**. If the event uses a stolen credential (the SSH password, the AWS key) from an address that never took the bait holding it, that address is linked to the one that did. The new address inherits the intrusion's progress, and the link raises a critical alert;
+6. raises an alert on first contact from an address and the first time that address touches each honeytoken (repeats are stored but not re-alerted, so a scanner cannot flood the screen);
+7. recomputes the threat score and selects the playbook.
 
 **Step 3: the threat score.** Scored 0–100 by `risk.py`:
 
@@ -123,7 +124,7 @@ Installed into every service, so all parts speak the same language.
 | Distinct honeytokens taken | 5 each, at most 20 |
 | Activity volume | 1 per 5 events, at most 10 |
 
-The total is capped at 100.
+The total is capped at 100. An address reusing the stolen credential of an intruder who is already contained scores 100 straight away.
 
 **Step 4: the response.**
 
@@ -139,8 +140,9 @@ The containment sequence:
 3. **Firewall ban.** The address is banned with nftables or iptables for one hour where the controller can do so; otherwise the ban is recorded as simulated.
 4. **Evidence snapshot.** The SSH decoy container is committed as an evidence image where Docker is reachable; otherwise the snapshot is recorded as simulated.
 5. **Record and broadcast.** The response and every step's outcome are stored and pushed to the dashboard.
+6. **Linked addresses.** Every address linked to this intruder is contained the same way.
 
-Addresses on the defender allowlist (the gateway and the controller itself) are never throttled or contained. An operator can also contain or release any address by hand from the dashboard.
+Addresses on the defender allowlist (the gateway and the controller itself) are never throttled or contained. An operator signed in with the operator key can also contain or release any address by hand from the dashboard.
 
 **Step 5: the dashboard shows it.** The page loads the current state over REST, then applies live deltas (`event`, `alert`, `attacker`, `response`) from the WebSocket. It shows a plain-language headline, the six-bait attack chain, a tactical map where each attacker is a tracked target moving between decoys, a target panel with the threat score and the Contain and Release buttons, an engagement timeline, charts, and a tabbed evidence queue: alerts, live feed, stolen baits, ATT&CK matrix and responses.
 
@@ -161,12 +163,13 @@ Every bait is unique to the deployment, generated by `tools/gen_honeytokens.py` 
 
 | Control | Why it is needed |
 |---|---|
-| Shared ingest token on `POST /api/events` | The attacker shares the lab network with the controller and could otherwise forge or flood events |
+| Per-decoy ingest tokens on `POST /api/events` | The attacker shares the lab network with the controller and could otherwise forge or flood events. Each decoy has its own token, so a token taken from one decoy cannot forge another decoy's events |
+| Operator key on Contain, Release and Reset | Only someone holding the key can change containment. It travels as a request header, which a page on another website cannot add, so a browser on the host cannot be tricked into sending these requests (cross-site request forgery) |
 | Lab lockdown | Requests from `10.66.0.0/24` may only reach `/health` and `POST /api/events`; everything else returns `404`, and the WebSocket closes. The attacker cannot read its own profile or release itself |
 | Dashboard bound to `127.0.0.1` | Only the host can open the dashboard and the controls |
 | Defender allowlist | Mirage can never lock out the gateway or itself |
 | Safe rendering | Every attacker-controlled string (user agents, passwords, commands, paths) is drawn as text, never as HTML |
-| No secrets in git | Fake keys are generated per deployment into an ignored file; GitHub push protection rejects even fake AWS-format keys |
+| No secrets in git | Tokens and the operator key are generated into `.env` by `tools/gen_secrets.py`; fake keys are generated per deployment into an ignored file. Both stay out of git |
 | Isolated lab | `internal` Docker network with no internet route; Mirage never acts outside the decoys it owns |
 
 ## 7. Technology
@@ -180,7 +183,7 @@ Every bait is unique to the deployment, generated by `tools/gen_honeytokens.py` 
 | Containment | Decoy-level enforcement, plus nftables/iptables where available |
 | Dashboard | One HTML page, plain JavaScript, Canvas and SVG, no build step |
 | Attack tools | nmap, gobuster, hydra, curl, OpenSSH, sshpass, AWS CLI |
-| Tests | pytest, 86 tests |
+| Tests | pytest, 94 tests |
 
 ## 8. Repository layout
 
@@ -192,7 +195,7 @@ decoys/admin-panel/     fake admin website (baits 1–2)
 decoys/ssh/             fake SSH deploy server (baits 3–4)
 decoys/s3/              fake S3 storage and bait spreadsheet (baits 5–6)
 eval/                   attacker image, campaign, benign traffic, metrics, op console
-tools/                  honeytoken generator
+tools/                  secret and honeytoken generators
 docs/                   progress, plan, requirements, event format, evaluation, demo playbook
 demo                    stage helper for running the lab and live demos
 docker-compose.yml      the lab

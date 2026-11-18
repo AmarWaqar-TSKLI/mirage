@@ -24,11 +24,11 @@ Both terminals start in the repo: `cd ~/Projects/IS_Project`
 
 ```bash
 sudo systemctl start docker
-./demo up            # starts the lab
+./demo up            # starts the lab and prints the dashboard sign-in link
 ./demo hackers 3     # three hacker machines: 10.66.0.50, .52, .53
 ./demo status        # everything "Up", all three hackers "connected"
 ```
-- Open the dashboard, F11 for full screen.
+- Open the **sign-in link** it printed (or `./demo key`), F11 for full screen. The top bar should say **Operator**: that key is what lets the dashboard's Intercept and Release buttons work.
 - Do one full practice run of all acts, then reset.
 
 ## 1 minute before (in S)
@@ -104,6 +104,12 @@ Start both within a second or two of each other:
 
 ---
 
+## Act 2b · Same intruder, new address (0:40)
+
+| Who | Type | What happens | Say |
+|---|---|---|---|
+| Defender (S) | `./demo hackers 4 && ./demo reuse 4` | A fresh machine, 10.66.0.54, logs in with the password T-01 stole. Banner **"Same intruder, new address · T-04 = T-01"**, a critical alert, and T-04 is contained at once. | "Changing machines doesn't help. The password it carries came from our bait, so Mirage knows it's the same intruder and blocks the new address instantly." |
+
 ## Act 3 · Finale: cut them off (1:00)
 
 | Time | Who | Type | What happens | Say |
@@ -146,8 +152,8 @@ Start both within a second or two of each other:
 
 | Stage (S) | Hacker (H) | Dashboard keys |
 |---|---|---|
-| `./demo up` · `down` · `status` · `show` | `./demo attack --pause 12` (slow, to explain) | **G** guide labels |
+| `./demo up` · `down` · `status` · `show` · `key` | `./demo attack --pause 12` (slow, to explain) | **G** guide labels |
 | `./demo observe` · `active` (each also resets) | `./demo attack --pause 6` (normal) | **F** follow the track |
 | `./demo reset` (clean slate, same mode) | `./demo attack --step` (Enter per phase) | **Esc** close overlays |
 | `./demo hackers 3` · `swarm 8` | `./demo watch` (uplink monitor) | **Ctrl + scroll** zoom |
-| `./demo isolate` · `restore` | | **Intercept now** / **Release** |
+| `./demo isolate` · `restore` · `reuse 4` | | **Intercept now** / **Release** |

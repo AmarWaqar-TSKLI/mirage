@@ -6,9 +6,9 @@ Mirage is an Information Security project that turns a network into a trap. Inst
 
 The project is based on the [MITRE Engage](https://engage.mitre.org) framework for adversary engagement, and every observed action is mapped to [MITRE ATT&CK](https://attack.mitre.org) techniques.
 
-> **Status:** Complete. Three decoys, the breadcrumb trail, detection with ATT&CK labelling, risk scoring, automatic response, the live dashboard and the evaluation harness all run end to end in the Docker lab, with 86 automated tests passing. Latest evaluation (17 Nov 2026): first alert within 25 ms, attacker contained in 2.6 s on average at bait 4 of 6, 0 false alarms from 400 normal-user requests.
+> **Status:** Complete. Three decoys, the breadcrumb trail, detection with ATT&CK labelling, risk scoring, automatic response, the live dashboard and the evaluation harness all run end to end in the Docker lab, with 94 automated tests passing. Each decoy has its own token, the dashboard controls need an operator key, and an intruder who switches address is linked back by the credentials it stole. Latest evaluation (19 Nov 2026): first alert within 16 ms, attacker contained in 2.4 s on average at bait 4 of 6, 0 false alarms from 400 normal-user requests.
 >
-> **Submission:** the graded deliverables (how to run, architecture, security analysis, source zip and slides) are in [`submissions/`](submissions/).
+> **Submission:** the graded deliverables (source zip, how to run, architecture, security analysis, slides) are in [`submissions/`](submissions/); their Markdown sources are in [`docs/submission/`](docs/submission/).
 
 ---
 
@@ -50,9 +50,9 @@ Uniquely tagged fake secrets, each recorded where it was planted:
 - A fake link in `robots.txt` that reveals scanning
 
 ### 4. Detection & Active Response Controller
-- **Single event flow:** every decoy sends events to one controller in one common format.
+- **Single event flow:** every decoy sends events to one controller in one common format, signed with that decoy's own token.
 - **Instant alerting:** each alert carries the attacker's IP, the asset touched and the mapped ATT&CK/Engage technique.
-- **Attacker profiling:** a per-attacker risk score built from trail progress and techniques used.
+- **Attacker profiling:** a per-attacker risk score built from trail progress and techniques used. An address that reuses a credential stolen by another is linked to it as the same intruder.
 - **Graded response playbooks:**
   | Playbook | Action |
   |---|---|
@@ -77,28 +77,28 @@ A single real-time web page showing:
 
 ## Evaluation
 
-Tested in the lab with a scripted attack using real tools (nmap, gobuster, hydra, SSH, AWS CLI) while a generator plays normal users against a real staff website. Five measured runs per mode, 17 November 2026:
+Tested in the lab with a scripted attack using real tools (nmap, gobuster, hydra, SSH, AWS CLI) while a generator plays normal users against a real staff website. Five measured runs per mode, 19 November 2026:
 
 | Metric | Response off (observe) | Response on (active) |
 |---|---|---|
-| Time to detect | 7 ms mean, 23 ms worst | under 1 ms |
-| Time to contain | n/a | 2.63 s ± 0.69 |
+| Time to detect | 3 ms mean, 7 ms worst | 4 ms mean, 16 ms worst |
+| Time to contain | n/a | 2.38 s ± 0.30 |
 | Furthest bait reached | 6 of 6 | 4 of 6 |
 | ATT&CK coverage | 100% | 78% (attack stopped early) |
 | False positives | 0 | 0 |
 
-Full results: [docs/eval-results.md](docs/eval-results.md). Discussion: [the security analysis](submissions/project-deliverables/04-security-analysis.md).
+Full results: [docs/eval-results.md](docs/eval-results.md). Discussion: [the security analysis](docs/submission/security-analysis.md).
 
 ## Quick start
 
 ```bash
-cp .env.example .env    # then set MIRAGE_INGEST_TOKEN to a random value
+cp .env.example .env && python3 tools/gen_secrets.py   # per-decoy tokens and the operator key
 python3 -m venv .venv && .venv/bin/pip install ./common && .venv/bin/python tools/gen_honeytokens.py
-./demo up               # dashboard at http://127.0.0.1:8000/
+./demo up               # prints the dashboard sign-in link
 ./demo attack           # run the narrated attack
 ```
 
-Full instructions: [How to run](submissions/project-deliverables/02-how-to-run.md).
+Full instructions: [How to run](docs/submission/how-to-run.md).
 
 ## Tech Stack
 

@@ -21,10 +21,9 @@ Mirage runs entirely inside an isolated Docker lab on one machine. These steps t
 git clone https://github.com/AmarWaqar-TSKLI/mirage.git
 cd mirage
 
-# 1. Environment file with a random shared secret the decoys use to talk to the controller
+# 1. Secrets: each decoy's own token, and the operator key for the dashboard's controls
 cp .env.example .env
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-#    paste the printed value into MIRAGE_INGEST_TOKEN= in .env
+python3 tools/gen_secrets.py        # fills them into .env with random values
 
 # 2. Generate this deployment's fake secrets (SSH password, AWS key pair).
 #    They go to config/honeytokens.local.json, which git ignores, so every
@@ -37,11 +36,13 @@ sudo systemctl start docker          # if Docker is not already running
 ./demo up
 ```
 
-`./demo up` builds every image, starts the lab and waits until the controller answers. The first build takes a few minutes.
+`./demo up` builds every image, starts the lab, waits until the controller answers and prints a **sign-in link**. The first build takes a few minutes.
 
 ## 3. Open the dashboard
 
-Open **http://127.0.0.1:8000/** in a browser on the host. It should say **"Airspace clear"**.
+Open the sign-in link that `./demo up` printed (`./demo key` prints it again). It looks like `http://127.0.0.1:8000/#key=…` and carries the operator key. The dashboard keeps the key for that browser tab and removes it from the address bar. It should say **"Airspace clear"**, and the top bar should show **Operator**.
+
+Opening plain **http://127.0.0.1:8000/** also works, in **Read-only** mode: you see everything, but **Intercept now** and **Release** ask for the key first.
 
 The dashboard is only reachable from the host. Machines inside the lab, including the attacker, get `404` for everything except event ingestion.
 
@@ -87,6 +88,15 @@ Each mode switch also clears the dashboard. `./demo attack` prints **● OBSERVE
 ./demo restore              # plug them back in
 ```
 
+### Optional: the same intruder on a new address
+
+```bash
+./demo hackers 4            # a fresh attacker machine at 10.66.0.54
+./demo reuse 4              # it logs in to SSH with the password hacker 1 stole
+```
+
+After hacker 1 has been contained, this login is linked to hacker 1 at once: a critical alert, a "same intruder, new address" banner, and immediate containment.
+
 ### Attacking by hand
 
 ```bash
@@ -120,7 +130,7 @@ uv pip install --python .venv ./common \
 .venv/bin/python -m pytest -q eval
 ```
 
-Expected: 86 tests pass (controller 28, admin panel 7, SSH 32, S3 10, evaluation 9).
+Expected: 94 tests pass (controller 36, admin panel 7, SSH 32, S3 10, evaluation 9).
 
 ## 8. Stop everything
 
@@ -136,19 +146,22 @@ sudo systemctl stop docker.socket docker.service  # optional: stop Docker itself
 | `./demo up` / `down` | Start / stop the whole lab |
 | `./demo status` / `show` | What is running, which mode / every container with its role and IP |
 | `./demo observe` / `active` | Switch response mode (and clear the board) |
+| `./demo key` | Print the dashboard sign-in link (operator key) |
 | `./demo reset` | Clear the dashboard, unblock and reconnect every attacker |
 | `./demo attack [--pause N \| --step \| --fast]` | The narrated attack on attacker 1 |
 | `./demo hackers N` / `swarm [SECS]` | Run N attacker machines / launch the extras in the background |
 | `./demo watch` | Uplink monitor on attacker 1 |
 | `./demo isolate [K]` / `restore` | Cut attackers off the network / reconnect them |
 | `./demo hacker [K]` | Open a shell on attacker K |
+| `./demo reuse [K]` | Attacker K logs in with the SSH password attacker 1 stole |
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `Docker is not running` | `sudo systemctl start docker` |
-| `set MIRAGE_INGEST_TOKEN in .env` | Step 2.1 was skipped |
+| `run tools/gen_secrets.py` | Step 2.1 was skipped |
+| "Operator key rejected" on the dashboard | Open the link from `./demo key` again |
 | Controller exits at start: honeytokens file missing | Run `tools/gen_honeytokens.py` (step 2.2) |
 | Attack ends at once with MISSION FAILED | The attacker is still blocked from a previous run: `./demo reset` |
 | Every attack phase says no route | The attacker is still isolated: `./demo reset` |
