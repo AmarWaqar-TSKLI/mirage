@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=23" />
+  <link rel="stylesheet" href="/static/style.css?v=24" />
 </head>
 <body data-state="idle">
   <div class="edge" id="edge" aria-hidden="true"></div>
@@ -37,6 +37,7 @@
         <span class="chip mono" id="mode-chip">Auto-intercept on</span>
       </div>
       <div class="top-right">
+        <button type="button" class="chip mono op-chip" id="op-chip">Read-only</button>
         <span class="link mono" id="link-text">Connecting</span>
         <button class="icon-btn" id="bell" type="button" aria-label="Open the alert queue"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg><b id="bell-n" hidden>0</b></button>
         <button class="btn-ghost-sm" id="guide" type="button" aria-pressed="false" title="Explain every panel (G)">Guide</button>
@@ -200,6 +201,6 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="tip" id="tip" hidden></div>
 
-  <script src="/static/app.js?v=23"></script>
+  <script src="/static/app.js?v=24"></script>
 </body>
 </html>

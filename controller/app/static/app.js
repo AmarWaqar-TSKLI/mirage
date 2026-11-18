@@ -207,6 +207,11 @@ function upsertAttacker(a) {
   const tr = track(a.ip);
   if (state.booted) {
     if (!prev) { toast("hot", "◆", `New hostile contact ${trackId(a.ip)}`, `${a.ip} touched a decoy. Tracking it now.`); flashEdge(K.red); banner("", "New hostile contact", trackId(a.ip), `${a.ip} just touched a decoy`); }
+    if (a.linked_to && !(prev && prev.linked_to)) {
+      // A stolen credential came back from a new address: same intruder.
+      toast("hot", "⇄", `${trackId(a.ip)} is ${trackId(a.linked_to)} on a new address`, `It used a credential ${a.linked_to} stole. Same intruder, new IP.`);
+      banner("", "Same intruder, new address", `${trackId(a.ip)} = ${trackId(a.linked_to)}`, `stolen credential reused from ${a.ip}`); flashEdge(K.red);
+    }
     if (prev && (a.max_stage || 0) > (prev.max_stage || 0)) {
       const s = STAGES[(a.max_stage || 1) - 1];
       toast("hot", String(a.max_stage), `${trackId(a.ip)} took ${s.bait}`, `Stage ${a.max_stage} of 6 · now at ${PLACE[a.max_stage + 1]}.`);
@@ -693,6 +698,7 @@ function showHover(h, mx, my) {
       card.classList.add("hostile");
       k = a.contained_at ? "Intercepted track" : "Hostile track"; title = `${trackId(a.ip)} · ${a.ip}`;
       rows.push(["Now at", PLACE[(a.max_stage || 0) + 1]], ["Baits taken", `${a.max_stage || 0} of 6`], ["Threat score", `${a.risk_score || 0} / 100`], ["First contact", fmtClock(a.first_seen)], ["Events", a.event_count || 0]);
+      if (a.linked_to) rows.push(["Same intruder as", `${trackId(a.linked_to)} · ${a.linked_to}`]);
       act = state.selected === a.ip ? "Locked · click a base or empty space to keep it" : "Click to lock this track";
     } else if (h.kind === "base") {
       const b = BASES[h.d], src = Object.keys(DECOY_OF_SOURCE).find((s) => DECOY_OF_SOURCE[s] === h.d);
@@ -817,7 +823,7 @@ function renderLock() {
     b.type = "button"; b.setAttribute("role", "listitem");
     const id = el("span", "id", trackId(x.ip)); id.append(el("span", null, x.ip));
     const bar = el("span", "bar"); for (let i = 1; i <= 6; i++) bar.append(el("i", i <= (x.max_stage || 0) ? "on" : null));
-    b.append(el("span", "sym"), id, el("span", "st", x.contained_at ? "intercepted" : bandOf(x) === "tarpit" ? "slowed" : `risk ${x.risk_score || 0}`), bar);
+    b.append(el("span", "sym"), id, el("span", "st", x.contained_at ? "intercepted" : x.linked_to ? `same as ${trackId(x.linked_to)}` : bandOf(x) === "tarpit" ? "slowed" : `risk ${x.risk_score || 0}`), bar);
     b.addEventListener("click", () => selectTrack(x.ip, true));
     host.append(b);
   }
@@ -1050,7 +1056,29 @@ function frame(now) {
 }
 
 // ------------------------------------------------------------------ io
-async function control(kind, ip) { try { await fetch(`/api/${kind}/${encodeURIComponent(ip)}`, { method: "POST" }); } catch (e) { console.warn("control failed", e); } }
+// Contain and Release need the operator key. It arrives once through the sign-in
+// link that ./demo up prints (#key=...), is kept for this browser tab only, and is
+// sent as a header, which a page on another site cannot add to a request.
+const KEY_STORE = "mirage.operatorKey";
+function operatorKey() { try { return sessionStorage.getItem(KEY_STORE) || ""; } catch { return ""; } }
+function setOperatorKey(key) {
+  try { key ? sessionStorage.setItem(KEY_STORE, key) : sessionStorage.removeItem(KEY_STORE); } catch { /* storage blocked */ }
+  const chip = $("op-chip"); chip.textContent = key ? "Operator" : "Read-only"; chip.classList.toggle("ok", !!key);
+  chip.title = key ? "Signed in: Contain and Release are enabled" : "Click to enter the operator key printed by ./demo up";
+}
+function askOperatorKey() {
+  const key = (prompt("Operator key (./demo up prints a sign-in link that carries it)") || "").trim();
+  if (key) setOperatorKey(key);
+  return key;
+}
+async function control(kind, ip) {
+  const key = operatorKey() || askOperatorKey();
+  if (!key) return;
+  try {
+    const r = await fetch(`/api/${kind}/${encodeURIComponent(ip)}`, { method: "POST", headers: { "X-Mirage-Operator": key } });
+    if (r.status === 401) { setOperatorKey(""); toast("warn", "!", "Operator key rejected", "Sign in again with the link from ./demo up."); }
+  } catch (e) { console.warn("control failed", e); }
+}
 async function loadInitial() {
   const get = (u) => fetch(u).then((r) => r.json());
   const [events, alerts, responses, attackers] = await Promise.all([get("/api/events?limit=2000"), get("/api/alerts?limit=300"), get("/api/responses?limit=200"), get("/api/attackers")]);
@@ -1083,6 +1111,11 @@ async function watchReset() {
 
 // ------------------------------------------------------------------ boot
 (function boot() {
+  // Sign-in link: take the key from the address, then remove it from the address bar and history.
+  const signIn = location.hash.match(/(?:^#|&)key=([^&]+)/);
+  if (signIn) { setOperatorKey(decodeURIComponent(signIn[1])); history.replaceState(null, "", location.pathname); }
+  else setOperatorKey(operatorKey());
+  $("op-chip").addEventListener("click", () => { if (!operatorKey()) askOperatorKey(); });
   buildTerrain(); buildDial(); sizeMap(); bindMap();
   new ResizeObserver(() => { sizeMap(); dirty.charts = true; lastChart = 0; }).observe($("map-wrap"));
   addEventListener("resize", moveInk);

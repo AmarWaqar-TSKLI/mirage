@@ -21,6 +21,10 @@ RESULTS="eval/results"
 mkdir -p "$RESULTS"
 stamp=$(date -u +%Y%m%d-%H%M%S)
 PY=$([ -x .venv/bin/python ] && echo .venv/bin/python || echo python3)
+# Reset needs the operator key (tools/gen_secrets.py writes it to .env).
+OPERATOR=$(sed -n 's/^MIRAGE_OPERATOR_TOKEN=//p' .env 2>/dev/null)
+[ -n "$OPERATOR" ] || { echo "no MIRAGE_OPERATOR_TOKEN in .env: run python3 tools/gen_secrets.py"; exit 1; }
+reset() { curl -sf -X POST -H "X-Mirage-Operator: $OPERATOR" "$API/api/admin/reset" >/dev/null || { echo "reset refused"; exit 1; }; }
 
 echo ">> bringing up the lab (response mode: $MODE)"
 MIRAGE_RESPONSE_MODE="$MODE" docker compose up -d --build controller admin-panel ssh s3
@@ -33,13 +37,13 @@ for _ in $(seq 1 30); do curl -sf "$API/health" >/dev/null 2>&1 && break; sleep 
 # measure. The first campaign after bring-up pays cold-start costs (containers
 # still settling, nmap/gobuster first run) that would otherwise skew run 1.
 echo ">> warmup campaign (not measured)"
-curl -s -X POST "$API/api/admin/reset" >/dev/null
+reset
 docker compose exec -T attacker /opt/campaign.sh >/dev/null 2>&1 || true
-curl -s -X POST "$API/api/admin/reset" >/dev/null
+reset
 
 for i in $(seq 1 "$N"); do
     echo ">> run $i/$N (mode=$MODE)"
-    curl -s -X POST "$API/api/admin/reset" >/dev/null
+    reset
     docker compose exec -T benign env LEGIT=10.66.0.30 REQUESTS="$BENIGN_REQ" /opt/benign.sh &
     benign_pid=$!
     docker compose exec -T attacker /opt/campaign.sh || true

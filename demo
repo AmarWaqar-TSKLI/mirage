@@ -5,6 +5,7 @@
 #   ./demo reset            clean slate: clear the dashboard, unblock and reconnect every hacker
 #   ./demo observe          Mirage only watches (attackers get all the way in), then reset
 #   ./demo active           Mirage responds on its own (auto-intercept), then reset
+#   ./demo key              print the dashboard sign-in link (needed for Contain / Release)
 #
 #   ./demo attack [ARGS]    run the narrated attack on hacker 1 (ARGS go to op: --pause 15, --step, --fast)
 #   ./demo watch            the uplink monitor on hacker 1, for the isolation finale
@@ -12,6 +13,7 @@
 #   ./demo hackers N        have N hacker machines in the lab (1 to 8, at 10.66.0.50, .52, .53 …)
 #   ./demo hacker [K]       open a shell on hacker K (default 1)
 #   ./demo swarm [SECS]     launch op on every extra hacker in the background, SECS apart (default 12)
+#   ./demo reuse [K]        hacker K (default 2) logs in to SSH with the password hacker 1 stole
 #
 #   ./demo isolate [K]      cut hacker K, or every hacker, off the network (host isolation)
 #   ./demo restore          plug every hacker back in
@@ -38,11 +40,15 @@ hackers() {   # numbers of the hacker machines that exist
 connected() { docker inspect -f '{{json .NetworkSettings.Networks}}' "$(name_of "$1")" 2>/dev/null | grep -q "\"$NET\""; }
 reconnect() { connected "$1" || { docker network connect --ip "$(ip_of "$1")" "$NET" "$(name_of "$1")"; say "hacker $1 reconnected at $(ip_of "$1")"; }; }
 
+# The operator key, for Reset and for the dashboard's sign-in link.
+operator() { sed -n 's/^MIRAGE_OPERATOR_TOKEN=//p' .env 2>/dev/null; }
+signin() { printf '%s▸%s dashboard sign-in: %s%s/#key=%s%s\n' "$G" "$X" "$B" "$API" "$(operator)" "$X"; }
 wait_api() { for _ in $(seq 1 40); do curl -sf "$API/health" >/dev/null 2>&1 && return 0; sleep 0.5; done; echo "${R}controller did not come up${X}"; exit 1; }
 mode() { curl -s "$API/api/mode" | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p'; }
 reset() {
     for k in $(hackers); do reconnect "$k"; docker exec "$(name_of "$k")" pkill -f /usr/local/bin/op >/dev/null 2>&1 || true; done
-    curl -s -X POST "$API/api/admin/reset" >/dev/null
+    curl -sf -X POST -H "X-Mirage-Operator: $(operator)" "$API/api/admin/reset" >/dev/null \
+        || { echo "${R}reset refused: is MIRAGE_OPERATOR_TOKEN set? python3 tools/gen_secrets.py${X}"; exit 1; }
     say "clean slate: dashboard cleared, every hacker unblocked"
 }
 set_mode() { MIRAGE_RESPONSE_MODE="$1" docker compose up -d controller >/dev/null 2>&1; wait_api; say "Mirage is now in ${B}$(mode)${X} mode"; }
@@ -51,7 +57,8 @@ case "${1:-help}" in
     up)
         docker info >/dev/null 2>&1 || { echo "${R}Docker is not running:${X} sudo systemctl start docker"; exit 1; }
         say "starting the lab…"; docker compose --profile eval up -d >/dev/null 2>&1; wait_api
-        say "lab is up · dashboard ${B}$API/${X} · mode ${B}$(mode)${X}" ;;
+        say "lab is up · mode ${B}$(mode)${X}"; signin ;;
+    key) signin ;;
     reset) reset ;;
     observe) set_mode observe; reset ;;
     active) set_mode active; reset ;;
@@ -84,6 +91,13 @@ case "${1:-help}" in
             say "hacker $k ($(ip_of "$k")) launched"
             [ "$k" = "$(echo "$extra" | tail -1)" ] || sleep "$gap"
         done ;;
+    reuse)
+        # The same intruder on a second machine: hacker K logs in with the SSH
+        # password hacker 1 stole from the backup .env. Mirage links the two.
+        k="${2:-2}"; pass=$(python3 -c "import json; print(next(t['value']['password'] for t in json.load(open('config/honeytokens.local.json'))['honeytokens'] if t['id'] == 'ht-ssh-password'))")
+        say "hacker $k ($(ip_of "$k")) logs in with the password hacker 1 stole…"
+        docker exec "$(name_of "$k")" sshpass -p "$pass" ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o PreferredAuthentications=password -o PubkeyAuthentication=no deploy@10.66.0.21 "whoami" 2>&1 | tail -20 || true ;;
     isolate)
         for k in ${2:-$(hackers)}; do
             connected "$k" || { say "hacker $k is already isolated"; continue; }
@@ -116,5 +130,5 @@ case "${1:-help}" in
     down)
         for k in $(hackers); do [ "$k" = 1 ] || docker rm -f "$(name_of "$k")" >/dev/null; done
         docker compose --profile eval down >/dev/null 2>&1; say "lab stopped" ;;
-    *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac
